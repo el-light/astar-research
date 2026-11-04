@@ -1,0 +1,1576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>When does A* save work?</title>
+<meta name="description" content="Animated defence deck: when does A* save work compared with Dijkstra?">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 fill=%22%23f7f7f4%22/%3E%3Ccircle cx=%225%22 cy=%2211%22 r=%223%22 fill=%22%232a78d6%22/%3E%3Ccircle cx=%2211%22 cy=%225%22 r=%223%22 fill=%22%23eb6834%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+/* Layout: one fixed 1920x1080 sheet, letterboxed; engineering-drawing feel with a title block footer.
+   Colour carries one meaning in the whole deck: blue = Dijkstra, orange = A*. Single light theme by choice (projector). */
+:root{
+  --paper:#f7f7f4; --surface:#fcfcfa; --ink:#17191b; --ink-2:#4b4f53; --muted:#7b8085;
+  --rule:#dddfd8; --rule-2:#c3c6be; --wall:#3a3d41;
+  --dij:#2a78d6; --ast:#eb6834;
+  --good:#0ca30c; --warn:#d99a00; --crit:#d03b3b;
+  --f-head:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
+  --f-text:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+html{height:100%;box-sizing:border-box}
+body{height:100%;box-sizing:border-box;margin:0;overflow:hidden;background:var(--paper);color:var(--ink);font-family:var(--f-text);
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:0}
+#viewport{position:relative;width:100%;height:100%;overflow:hidden}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;background:var(--paper)}
+
+.slide{position:absolute;inset:0;padding:76px 104px 120px;box-sizing:border-box;display:flex;flex-direction:column;
+  opacity:0;visibility:hidden;transition:opacity .35s ease, visibility 0s linear .35s}
+.slide.active{opacity:1;visibility:visible;transition:opacity .35s ease}
+.rise{opacity:0;transform:translateY(16px)}
+.slide.active .rise{opacity:1;transform:none;transition:opacity .5s ease var(--d,0ms), transform .5s ease var(--d,0ms)}
+[data-build]{opacity:0;transform:translateY(14px);transition:opacity .45s ease, transform .45s ease}
+[data-build].shown{opacity:1;transform:none}
+
+.kicker{display:flex;justify-content:space-between;align-items:baseline;font:500 19px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.kicker .src{letter-spacing:.04em;text-transform:none;font-weight:400}
+.h{font:600 64px/1.06 var(--f-head);letter-spacing:-.005em;margin:16px 0 0;max-width:1600px;text-wrap:balance}
+.lead{font:400 28px/1.4 var(--f-text);color:var(--ink-2);margin:12px 0 0;max-width:1500px}
+.body{flex:1;min-height:0;margin-top:30px;display:flex;gap:64px}
+p{margin:0}
+code,.mono{font-family:var(--f-mono)}
+b{font-weight:600}
+
+/* title block footer */
+.foot{position:absolute;left:104px;right:104px;bottom:28px;border-top:1px solid var(--rule-2);padding-top:12px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;font:400 18px var(--f-mono);color:var(--muted);letter-spacing:.03em;z-index:5}
+.foot .mid{text-transform:uppercase;letter-spacing:.1em}
+.foot .nav{justify-self:end;display:flex;align-items:center;gap:14px}
+.foot .num{font-variant-numeric:tabular-nums;color:var(--ink)}
+.navbtn{width:40px;height:34px;border:1px solid var(--rule-2);background:transparent;color:var(--ink);font:500 18px var(--f-mono);cursor:pointer;padding:0}
+.navbtn:hover{border-color:var(--ink)}
+.navbtn:focus-visible,.btn:focus-visible{outline:3px solid var(--dij);outline-offset:3px}
+
+/* algorithm identity */
+.alg{display:inline-flex;align-items:center;gap:12px;font:600 26px/1 var(--f-text);white-space:nowrap}
+.alg i{width:18px;height:18px;display:inline-block;background:var(--c)}
+.alg.d i{--c:var(--dij)} .alg.a i{--c:var(--ast)}
+.alg .f{font:400 19px var(--f-mono);color:var(--muted);font-weight:400}
+
+/* races */
+.race{display:flex;flex-direction:column;gap:12px}
+.panels{display:grid;grid-template-columns:repeat(2,800px);justify-content:space-between}
+.panel{display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel-head{display:flex;justify-content:space-between;align-items:center;height:34px}
+.count{font:500 24px var(--f-mono);font-variant-numeric:tabular-nums}
+.count small{font:400 17px var(--f-mono);color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-right:10px}
+.panel canvas{display:block;width:100%;aspect-ratio:63/35;background:var(--surface);outline:1px solid var(--rule-2)}
+.race-foot{display:flex;align-items:center;gap:12px;min-height:46px}
+.race-sum{font:400 22px/1.3 var(--f-text);color:var(--ink-2);margin-left:12px}
+.race-sum b{color:var(--ink)}
+.btn{font:500 16px/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:transparent;border:1.5px solid var(--ink);padding:11px 15px;cursor:pointer;border-radius:0;white-space:nowrap}
+.btn:hover{background:var(--ink);color:var(--paper)}
+.btn[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.seg{display:inline-flex}
+.seg .btn+.btn{border-left:0}
+.legend{display:flex;flex-wrap:wrap;gap:10px 26px;font:400 19px/1.2 var(--f-text);color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:9px}
+.sw{width:16px;height:16px;display:inline-block;flex:none}
+
+/* stats strip */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border-top:1.5px solid var(--ink);margin-top:22px}
+.stat{padding:16px 24px 0 0;border-right:1px solid var(--rule)}
+.stat+.stat{padding-left:24px}
+.stat:last-child{border-right:0}
+.stat b{display:block;font:500 56px/1 var(--f-text);letter-spacing:-.02em}
+.stat span{display:block;font:400 21px/1.35 var(--f-text);color:var(--ink-2);margin-top:8px}
+.stat span b{display:inline;font:600 21px/1.35 var(--f-text);letter-spacing:0;color:var(--ink)}
+
+/* tables */
+table.t{border-collapse:collapse;width:100%;font:400 23px/1.3 var(--f-text)}
+.t th{font:500 16px/1.25 var(--f-mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:left;padding:0 20px 12px 0;border-bottom:1.5px solid var(--ink);vertical-align:bottom}
+.t td{padding:13px 20px 13px 0;border-bottom:1px solid var(--rule);vertical-align:top}
+.t .n{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.t tr.em td{font-weight:600}
+.t .muted{color:var(--muted)}
+.verdict{display:inline-flex;align-items:center;gap:9px;font:500 21px var(--f-text);white-space:nowrap}
+.verdict::before{font:600 22px var(--f-mono);width:22px;text-align:center}
+.verdict.good::before{content:"\2713";color:var(--good)}
+.verdict.warn::before{content:"\25D0";color:var(--warn)}
+.verdict.crit::before{content:"\2715";color:var(--crit)}
+
+/* charts */
+svg{display:block;overflow:visible}
+svg text{font-family:var(--f-text);fill:var(--ink)}
+.ax{font:400 17px var(--f-mono);fill:var(--muted)}
+.lab{font:500 24px var(--f-text)}
+.sub{font:400 17px var(--f-mono);fill:var(--muted)}
+.val{font:500 21px var(--f-mono)}
+.ann{font:400 20px var(--f-text);fill:var(--ink-2)}
+.gridl{stroke:var(--rule);stroke-width:1}
+.base{stroke:var(--rule-2);stroke-width:1.5}
+.parity{stroke:var(--ink-2);stroke-width:1.5}
+.conn{stroke:var(--ink-2);stroke-width:2}
+.ring{fill:var(--surface);stroke:var(--ink);stroke-width:2.5}
+.dot{fill:var(--ink);stroke:var(--surface);stroke-width:2}
+.line{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+
+/* misc blocks */
+.side{display:flex;flex-direction:column;gap:22px;font:400 25px/1.42 var(--f-text);color:var(--ink-2);min-width:0}
+.side b{color:var(--ink)}
+.code{font:400 21px/1.55 var(--f-mono);color:var(--ink);background:var(--surface);border-left:3px solid var(--ink);padding:16px 22px;margin:0;white-space:pre}
+.formula{font:500 34px/1.3 var(--f-mono);color:var(--ink)}
+.frac{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin:0 10px;font-size:.8em;line-height:1.2}
+.frac span{padding:3px 8px;white-space:nowrap}
+.frac span:first-child{border-bottom:2px solid currentColor}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1.5px solid var(--ink)}
+.fact{padding:18px 26px 18px 0;border-bottom:1px solid var(--rule)}
+.fact+.fact{padding-left:26px;border-left:1px solid var(--rule)}
+.fact:nth-child(3n+1){padding-left:0;border-left:0}
+.fact h3{font:500 16px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.fact p{font:400 23px/1.4 var(--f-text);color:var(--ink)}
+.thumbs{display:grid;grid-template-columns:repeat(5,1fr);gap:28px}
+.thumbs figure{margin:0;display:flex;flex-direction:column;gap:10px}
+.thumbs canvas{width:100%;aspect-ratio:63/35;display:block;background:var(--surface);outline:1px solid var(--rule-2)}
+.thumbs figcaption{font:400 19px var(--f-mono);color:var(--ink-2)}
+.thumbs figcaption b{font-weight:500;color:var(--ink)}
+.hgrid{display:grid;grid-template-columns:repeat(9,46px);grid-auto-rows:46px;gap:0;border-top:1px solid var(--rule-2);border-left:1px solid var(--rule-2);align-self:flex-start}
+.hgrid div{border-right:1px solid var(--rule-2);border-bottom:1px solid var(--rule-2);display:flex;align-items:center;justify-content:center;font:400 19px var(--f-mono);color:var(--ink-2);background:var(--surface)}
+.hgrid .t{background:var(--ink);color:var(--paper);font-weight:500}
+.hgrid .s{outline:3px solid var(--ast);outline-offset:-3px;color:var(--ink);font-weight:500}
+.big-statement{font:600 76px/1.08 var(--f-head);letter-spacing:-.01em;max-width:1500px;text-wrap:balance}
+
+/* cover */
+.cover{padding-top:96px}
+.cover-grid{flex:1;display:grid;grid-template-columns:780px 860px;justify-content:space-between;align-items:center}
+.cover-title{font:600 132px/.98 var(--f-head);letter-spacing:-.015em;margin:26px 0 0;text-wrap:balance}
+.cover .lead{font-size:30px;margin-top:30px}
+.authors{font:500 26px var(--f-text);margin-top:46px}
+.authors span{display:block;font:400 19px var(--f-mono);color:var(--muted);margin-top:10px;letter-spacing:.03em}
+.cover figure{margin:0;display:flex;flex-direction:column;gap:16px}
+.cover canvas{width:860px;aspect-ratio:63/35;display:block;background:var(--surface);outline:1px solid var(--rule-2)}
+.hint{position:absolute;left:104px;bottom:86px;font:400 17px var(--f-mono);color:var(--muted);letter-spacing:.03em}
+
+@media (prefers-reduced-motion: reduce){
+  .slide,.slide.active,.rise,.slide.active .rise,[data-build]{transition:none!important}
+  .rise{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+
+<div id="viewport">
+<div id="stage">
+
+<!-- 1 · cover -->
+<section class="slide cover active" data-section="">
+  <div class="cover-grid">
+    <div>
+      <div class="kicker"><span>ADSA · Project T01 · UFAZ · Fall 2026</span></div>
+      <h1 class="cover-title">When does A* save&nbsp;work?</h1>
+      <p class="lead">Dijkstra and A* on grids with obstacles and on the California road network. They return the same shortest paths, but do very different amounts of work to find them.</p>
+      <div class="authors">Elnur Haqqverdiyev · Rajab Iskandarli<span>M1 Data Science and Artificial Intelligence</span></div>
+    </div>
+    <figure>
+      <canvas id="cover-canvas" aria-label="Open grid: cells settled by Dijkstra in blue, by A* in orange, and the shared shortest path"></canvas>
+      <div class="legend">
+        <span><i class="sw" style="background:#bdd5f3"></i>Dijkstra settled <b id="cv-d" class="mono">–</b> cells</span>
+        <span><i class="sw" style="background:#f6c8b1"></i>A* settled <b id="cv-a" class="mono">–</b> cells</span>
+        <span><i class="sw" style="background:var(--ink);height:5px"></i>same path, <b id="cv-p" class="mono">–</b> steps</span>
+      </div>
+    </figure>
+  </div>
+  <div class="hint">← → to move · F for full screen · R replays an animation</div>
+</section>
+
+<!-- 2 · question -->
+<section class="slide" data-section="Question">
+  <div class="kicker"><span>The question</span></div>
+  <h2 class="h">Both algorithms return the same shortest path. The difference is how much of the graph they look at.</h2>
+  <div class="body" style="gap:96px;align-items:flex-start;margin-top:56px">
+    <div style="width:640px;display:flex;flex-direction:column;gap:30px" class="rise" >
+      <div class="fact" style="padding:0;border:0"><h3>Measure 1 · work</h3><p><b>Expanded vertices</b>: how many vertices the search settles before it reaches the target.</p></div>
+      <div class="fact" style="padding:0;border:0"><h3>Measure 2 · cost</h3><p><b>Wall-clock time</b>: nanoseconds around one search call, median of repeated runs.</p></div>
+      <div class="fact" style="padding:0;border:0"><h3>Comparison</h3><p>Always <b>paired</b>: both algorithms run on the same graph, the same source and target. Ratio = Dijkstra ÷ A*, so above 1 means A* wins.</p></div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:40px;border-left:1.5px solid var(--ink);padding-left:56px">
+      <div class="formula" style="font-size:40px">time = <u style="text-decoration-thickness:3px;text-decoration-color:var(--rule-2)">expansions</u> × <u style="text-decoration-thickness:3px;text-decoration-color:var(--rule-2)">cost per expansion</u></div>
+      <div data-build>
+        <p style="font:400 26px/1.4 var(--f-text);color:var(--ink-2);margin-bottom:14px">So A* is faster only when</p>
+        <div class="formula"><span class="frac"><span>expansions(Dijkstra)</span><span>expansions(A*)</span></span> &gt; <span class="frac"><span>cost(A*)</span><span>cost(Dijkstra)</span></span></div>
+      </div>
+      <p data-build style="font:400 26px/1.45 var(--f-text);color:var(--ink-2);max-width:820px">One A* expansion costs <b>1.2 to 2.0×</b> a Dijkstra expansion in our runs: for every vertex it settles, A* pushes more entries into the heap and computes h for each of them. The rest of the talk is about when the left side is bigger.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · Dijkstra -->
+<section class="slide" data-section="Method">
+  <div class="kicker"><span>How Dijkstra searches</span><span class="src">illustration · 63 × 35 grid</span></div>
+  <h2 class="h">Dijkstra settles vertices in order of distance from the start</h2>
+  <div class="body">
+    <div class="race" data-race="solo-d" style="width:1000px;flex:none">
+      <div class="panel">
+        <div class="panel-head"><span class="alg d"><i></i>Dijkstra <span class="f">f = g</span></span><span class="count"><small>settled</small><span data-count>0</span></span></div>
+        <canvas></canvas>
+      </div>
+      <div class="race-foot"><button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button><span class="race-sum" data-sum></span></div>
+    </div>
+    <div class="side">
+      <p>Priority <b class="mono">f(v) = g(v)</b>, the distance walked so far. The closest unsettled vertex is always next.</p>
+      <p>The frontier grows like a ripple, the same in every direction. Dijkstra has no idea where the target is.</p>
+      <pre class="code">pop u with the smallest f
+if u is already settled: skip it
+if u is the target: stop
+for each neighbour v of u:
+  if g(u) + w(u,v) &lt; g(v):
+    g(v) = g(u) + w(u,v)
+    push v with priority f(v)</pre>
+      <div class="legend"><span><i class="sw" style="background:#bdd5f3"></i>settled</span><span><i class="sw" style="background:var(--dij);transform:scale(.55)"></i>waiting in the heap</span><span><i class="sw" style="background:var(--ink);height:5px"></i>shortest path</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 · A* -->
+<section class="slide" data-section="Method">
+  <div class="kicker"><span>How A* searches</span><span class="src">illustration · same grid, same start and target</span></div>
+  <h2 class="h">A* adds a guess of the remaining distance</h2>
+  <div class="body">
+    <div class="race" data-race="solo-a" style="width:1000px;flex:none">
+      <div class="panel">
+        <div class="panel-head"><span class="alg a"><i></i>A* <span class="f">f = g + h</span></span><span class="count"><small>settled</small><span data-count>0</span></span></div>
+        <canvas></canvas>
+      </div>
+      <div class="race-foot"><button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button><span class="race-sum" data-sum></span></div>
+    </div>
+    <div class="side" style="gap:20px">
+      <p style="font-size:23px">Priority <b class="mono">f(v) = g(v) + h(v)</b>: distance walked plus a guess of what is left, so f estimates the whole path through v. On a grid the guess is <b>Manhattan distance</b>: steps left or right plus steps up or down.</p>
+      <div class="hgrid" id="hgrid" aria-label="Manhattan distance from each cell to the target"></div>
+      <p style="font:400 18px/1.4 var(--f-mono);color:var(--muted);margin-top:-6px">h to the target ◎ · outlined cell: h = 8, and with no walls the true distance is also 8</p>
+      <p style="font-size:23px">It never overestimates, so A* still returns the <b>exact</b> shortest path. It changes by at most 1 per step, so no vertex is settled twice.</p>
+      <p style="font-size:23px">Ties in f are broken toward the larger g (<span class="mono">larger_g</span>): keep walking the path you are on.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · setup -->
+<section class="slide" data-section="Method">
+  <div class="kicker"><span>What we measured</span><span class="src">frozen protocol · PROTOCOL.md</span></div>
+  <h2 class="h">Five grid structures and one real road network</h2>
+  <div style="margin-top:34px" class="thumbs">
+    <figure class="rise" style="--d:0ms"><canvas data-thumb="open"></canvas><figcaption><b>open</b> · no walls</figcaption></figure>
+    <figure class="rise" style="--d:70ms"><canvas data-thumb="random"></canvas><figcaption><b>random</b> · 20% walls</figcaption></figure>
+    <figure class="rise" style="--d:140ms"><canvas data-thumb="clustered"></canvas><figcaption><b>clustered</b> · 30% in blobs</figcaption></figure>
+    <figure class="rise" style="--d:210ms"><canvas data-thumb="rooms"></canvas><figcaption><b>rooms</b> · walls with doors</figcaption></figure>
+    <figure class="rise" style="--d:280ms"><canvas data-thumb="maze"></canvas><figcaption><b>maze</b> · one route only</figcaption></figure>
+  </div>
+  <div class="facts" style="margin-top:36px">
+    <div class="fact"><h3>Grids</h3><p>Each family at 128², 256², 512² and 1024² cells, 4-neighbour, unit cost.</p></div>
+    <div class="fact"><h3>Road network</h3><p>SNAP roadNet-CA: 1,957,027 intersections, 2,760,388 road segments, unit hop cost.</p></div>
+    <div class="fact"><h3>One search routine</h3><p>Dijkstra is the A* code with h = 0: same heap, same loop, same counters.</p></div>
+    <div class="fact"><h3>Queries</h3><p>15 per grid, 30 on roads, in short, medium and long distance bands chosen by BFS.</p></div>
+    <div class="fact"><h3>Treatments</h3><p>Grids: Dijkstra, A* (larger_g), A* (node_id). Roads: Dijkstra, ALT with K = 1, 4, 8, 16. 3,600 timed runs.</p></div>
+    <div class="fact"><h3>Correctness</h3><p>3,600 of 3,600 runs matched an independent BFS distance. No timeouts.</p></div>
+  </div>
+</section>
+
+<!-- 6 · open -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Case 1 of 5 · open grid</span><span class="src">numbers: 60 queries, 128² to 1024², medians</span></div>
+  <h2 class="h">Open grid: Manhattan distance is exact</h2>
+  <p class="lead">A* only settles cells that lie on a shortest path; the larger_g tie-break keeps it on one of them.</p>
+  <div class="race" data-race="case" data-family="open" style="margin-top:22px">
+    <div class="panels">
+      <div class="panel"><div class="panel-head"><span class="alg d"><i></i>Dijkstra</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · Manhattan</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+    </div>
+    <div class="race-foot"><button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button><span class="race-sum" data-sum></span></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>222×</b><span>fewer expanded vertices with A*</span></div>
+    <div class="stat"><b>106×</b><span>faster in wall-clock time</span></div>
+    <div class="stat"><b>100%</b><span>of queries where A* was faster</span></div>
+    <div class="stat"><b>2.03×</b><span>cost of one A* expansion vs one Dijkstra expansion</span></div>
+  </div>
+</section>
+
+<!-- 7 · random -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Case 2 of 5 · random obstacles</span><span class="src">numbers: 60 queries, 128² to 1024², medians</span></div>
+  <h2 class="h">Random walls: the guess is slightly optimistic</h2>
+  <p class="lead">Walls only make paths longer, so Manhattan stays a safe lower bound. Small detours make A* spread a little.</p>
+  <div class="race" data-race="case" data-family="random" style="margin-top:22px">
+    <div class="panels">
+      <div class="panel"><div class="panel-head"><span class="alg d"><i></i>Dijkstra</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · Manhattan</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+    </div>
+    <div class="race-foot"><button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button><span class="race-sum" data-sum></span></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>21.4×</b><span>fewer expanded vertices with A*</span></div>
+    <div class="stat"><b>12.8×</b><span>faster in wall-clock time</span></div>
+    <div class="stat"><b>98%</b><span>of queries where A* was faster</span></div>
+    <div class="stat"><b>1.62×</b><span>cost of one A* expansion vs one Dijkstra expansion</span></div>
+  </div>
+</section>
+
+<!-- 8 · clustered -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Case 3 of 5 · clustered obstacles</span><span class="src">numbers: 60 queries, 128² to 1024², medians</span></div>
+  <h2 class="h">Clustered walls: A* bumps into blobs and goes around</h2>
+  <p class="lead">Behind a blob the guess is too small, so A* fans out along its edge. Most of the grid is still never touched.</p>
+  <div class="race" data-race="case" data-family="clustered" style="margin-top:22px">
+    <div class="panels">
+      <div class="panel"><div class="panel-head"><span class="alg d"><i></i>Dijkstra</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · Manhattan</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+    </div>
+    <div class="race-foot"><button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button><span class="race-sum" data-sum></span></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>22.9×</b><span>fewer expanded vertices with A*</span></div>
+    <div class="stat"><b>12.8×</b><span>faster in wall-clock time</span></div>
+    <div class="stat"><b>98%</b><span>of queries where A* was faster</span></div>
+    <div class="stat"><b>1.93×</b><span>cost of one A* expansion vs one Dijkstra expansion</span></div>
+  </div>
+</section>
+
+<!-- 9 · rooms -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Case 4 of 5 · rooms</span><span class="src">numbers: 60 queries, 128² to 1024², medians</span></div>
+  <h2 class="h">Rooms: every route has to pass through doors</h2>
+  <p class="lead">The straight line runs into a wall, and A* fills part of each room until it finds the next door.</p>
+  <div class="race" data-race="case" data-family="rooms" style="margin-top:22px">
+    <div class="panels">
+      <div class="panel"><div class="panel-head"><span class="alg d"><i></i>Dijkstra</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · Manhattan</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+    </div>
+    <div class="race-foot"><button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button><span class="race-sum" data-sum></span></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>14.3×</b><span>fewer expanded vertices with A*</span></div>
+    <div class="stat"><b>8.7×</b><span>faster in wall-clock time</span></div>
+    <div class="stat"><b>100%</b><span>of queries where A* was faster</span></div>
+    <div class="stat"><b>1.85×</b><span>cost of one A* expansion vs one Dijkstra expansion</span></div>
+  </div>
+</section>
+
+<!-- 10 · maze -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Case 5 of 5 · perfect maze</span><span class="src">numbers: 60 queries, 128² to 1024², medians</span></div>
+  <h2 class="h">Maze: the guess points through walls</h2>
+  <p class="lead">Manhattan sees a straight line, but the only route winds. A* settles almost the same cells and pays extra for each one.</p>
+  <div class="race" data-race="case" data-family="maze" style="margin-top:22px">
+    <div class="panels">
+      <div class="panel"><div class="panel-head"><span class="alg d"><i></i>Dijkstra</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · Manhattan</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+    </div>
+    <div class="race-foot"><button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button><span class="race-sum" data-sum></span></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>1.02×</b><span>fewer expanded vertices: almost none</span></div>
+    <div class="stat"><b>0.81×</b><span>time ratio: A* is <b>24% slower</b></span></div>
+    <div class="stat"><b>17%</b><span>of queries where A* was faster</span></div>
+    <div class="stat"><b>1.21×</b><span>cost of one A* expansion vs one Dijkstra expansion</span></div>
+  </div>
+</section>
+
+<!-- 11 · overview -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>All cases on one scale</span><span class="src">ratio Dijkstra ÷ A*, log scale, medians</span></div>
+  <h2 class="h">Structure decides: from 106× faster to 24% slower</h2>
+  <div style="margin-top:34px" data-chart="overview"></div>
+  <p style="font:400 24px/1.4 var(--f-text);color:var(--ink-2);margin-top:4px">In every row the dot (time) sits left of the ring (expansions): A* always gains less time than it saves in expansions. The next slide shows why.</p>
+</section>
+
+<!-- 12 · cost -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Why time saving is smaller than expansion saving</span><span class="src">medians per query · ns = nanoseconds</span></div>
+  <h2 class="h">Each A* step costs more, so it must save more steps</h2>
+  <div class="body" style="gap:72px;margin-top:40px">
+    <div style="width:780px;flex:none" data-chart="cost"></div>
+    <div style="flex:1;min-width:0">
+      <table class="t">
+        <thead><tr><th>Graph</th><th class="n">fewer<br>expansions</th><th class="n">costlier<br>step</th><th class="n">predicted<br>= ÷</th><th class="n">measured<br>time ratio</th></tr></thead>
+        <tbody>
+          <tr><td>open</td><td class="n">222×</td><td class="n">2.03×</td><td class="n">109×</td><td class="n"><b>106×</b></td></tr>
+          <tr><td>random</td><td class="n">21.4×</td><td class="n">1.62×</td><td class="n">13.2×</td><td class="n"><b>12.8×</b></td></tr>
+          <tr><td>clustered</td><td class="n">22.9×</td><td class="n">1.93×</td><td class="n">11.9×</td><td class="n"><b>12.8×</b></td></tr>
+          <tr><td>rooms</td><td class="n">14.3×</td><td class="n">1.85×</td><td class="n">7.7×</td><td class="n"><b>8.7×</b></td></tr>
+          <tr><td>maze</td><td class="n">1.02×</td><td class="n">1.21×</td><td class="n">0.84×</td><td class="n"><b>0.81×</b></td></tr>
+          <tr><td>roads, ALT K = 8</td><td class="n">11.5×</td><td class="n">1.59×</td><td class="n">7.3×</td><td class="n"><b>7.6×</b></td></tr>
+        </tbody>
+      </table>
+      <p data-build style="font:400 23px/1.45 var(--f-text);color:var(--ink-2);margin-top:24px">Fewer expansions ÷ costlier step predicts the measured speed-up within 13% in every case. In the maze the first number is 1.02, so the extra cost per step decides the result.</p>
+      <p data-build style="font:400 23px/1.45 var(--f-text);color:var(--ink-2);margin-top:16px">Why a step costs more: for each vertex it settles, A* pushes 1.6 to 3.0 heap entries (Dijkstra: 1.0) and computes h for each one. These are neighbours at the edge of its narrow search that it never settles. Open grid: 3.0 pushes, 2.03× cost; maze: 1.0 push, 1.21×.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 13 · scaling -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Grid size</span><span class="src">time ratio Dijkstra ÷ A*, 15 queries per point, log scale</span></div>
+  <h2 class="h">The open-grid win grows with size; walls cap it</h2>
+  <div class="body" style="gap:64px;margin-top:30px">
+    <div style="width:1100px;flex:none" data-chart="scaling"></div>
+    <div class="side" style="padding-top:20px">
+      <p>On the open grid Dijkstra's work grows with the area (about 2d² cells for distance d) while A* grows with the path (about d cells), so the ratio grows like d: <b>45× at 128²</b>, <b>390× at 1024²</b>. Eight times the side gave 8.6 times the ratio.</p>
+      <p>With walls the ratio stays between 8× and 34× at every size: detours keep the A* search wider than one path. The maze approaches 1 but never crosses it in the median.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 14 · bands -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Query distance</span><span class="src">time ratio / expansion ratio, Dijkstra ÷ A*, medians</span></div>
+  <h2 class="h">Longer queries mean more work, not always a bigger saving</h2>
+  <div class="body" style="gap:80px;margin-top:40px">
+    <div style="width:1060px;flex:none">
+      <table class="t">
+        <thead><tr><th>Graph</th><th class="n">short<br>8–25% of max</th><th class="n">medium<br>40–60%</th><th class="n">long<br>80–97%</th></tr></thead>
+        <tbody>
+          <tr><td>open</td><td class="n">83.5× / 150×</td><td class="n">150× / 298×</td><td class="n"><b>156× / 295×</b></td></tr>
+          <tr><td>random</td><td class="n"><b>14.4× / 22.2×</b></td><td class="n">12.8× / 20.1×</td><td class="n">11.5× / 21.6×</td></tr>
+          <tr><td>clustered</td><td class="n">11.9× / 20.9×</td><td class="n">14.3× / 24.3×</td><td class="n">12.0× / 22.8×</td></tr>
+          <tr><td>rooms</td><td class="n">10.3× / 11.9×</td><td class="n">6.9× / 10.6×</td><td class="n">9.5× / 20.8×</td></tr>
+          <tr><td>maze</td><td class="n">0.82× / 1.05×</td><td class="n">0.75× / 1.01×</td><td class="n">0.84× / 1.00×</td></tr>
+          <tr><td>roads, ALT K = 8</td><td class="n"><b>14.9× / 19.1×</b></td><td class="n">9.4× / 13.5×</td><td class="n">4.3× / 7.5×</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="side" style="padding-top:8px">
+      <p>Only the open grid gains clearly with distance, on both machines.</p>
+      <p>On random grids the long-query saving is slightly <b>lower</b> than the short one, and on roads it falls from 14.9× to 4.3×.</p>
+      <p>Neither trend came back in the replication (random long 26.8× vs short 20.9×; roads 10.0×, 9.8×, 13.2×). With 5 to 10 queries per cell, distance effects are noise next to structure.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 15 · tie-break -->
+<section class="slide" data-section="Grid cases">
+  <div class="kicker"><span>Tie-breaking on the open grid</span><span class="src">numbers: 60 open-grid queries per machine, expansions node_id ÷ larger_g</span></div>
+  <h2 class="h">Tie-breaking: node_id fails whenever the target is below</h2>
+  <p class="lead">Many cells tie on f. <span class="mono">larger_g</span> keeps walking; <span class="mono">node_id</span> takes the lowest cell number: the top rows.</p>
+  <div class="race" data-race="tie" style="margin-top:22px">
+    <div class="panels">
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · larger_g</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · node_id</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+    </div>
+    <div class="race-foot">
+      <button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button>
+      <span class="seg" role="group" aria-label="Target position"><button class="btn" data-dir="below" aria-pressed="true">Target below start</button><button class="btn" data-dir="above">Target above start</button></span>
+      <span class="race-sum" data-sum></span>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>72 of 73</b><span>queries with the target below the start got worse with node_id (both machines)</span></div>
+    <div class="stat"><b>0 of 47</b><span>queries with the target above or level got worse</span></div>
+    <div class="stat"><b>286×</b><span>worst single query: node_id expanded this many times more</span></div>
+    <div class="stat"><b>1.00× vs 35.8×</b><span>median on the two machines: 47% vs 75% of targets were below</span></div>
+  </div>
+</section>
+
+<!-- 16 · ALT explained -->
+<section class="slide" data-section="Road network">
+  <div class="kicker"><span>Road network · the heuristic</span><span class="src">ALT = A*, Landmarks, Triangle inequality</span></div>
+  <h2 class="h">Roads have no grid coordinates, so landmarks give the lower bound</h2>
+  <div class="body" style="gap:80px;margin-top:36px">
+    <div style="width:760px;flex:none" id="alt-diagram"></div>
+    <div class="side">
+      <p data-build><b>Before any query:</b> pick 16 landmarks far from each other and store the BFS distance from each landmark to every vertex (16 × 1.96 M numbers, 125 MB).</p>
+      <p data-build><b>Triangle inequality:</b> going from L to v through t is never shorter than the shortest route, <span class="mono">d(L,v) ≤ d(L,t) + d(t,v)</span>, so <span class="mono">d(v,t) ≥ d(L,v) − d(L,t)</span>.</p>
+      <div data-build class="formula" style="font-size:30px;border-left:3px solid var(--ink);padding-left:22px">h(v) = max over landmarks |d(L,v) − d(L,t)|</div>
+      <p data-build>It never overestimates and is consistent, so A* still returns the true shortest path. The experiment uses the first <b>K = 1, 4, 8 or 16</b> landmarks; every h(v) reads K table entries.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 17 · road race -->
+<section class="slide" data-section="Road network">
+  <div class="kicker"><span>Road network · how both search</span><span class="src">illustration: synthetic street grid with two lakes, unit hop cost</span></div>
+  <h2 class="h">ALT pulls the search toward the target; more landmarks pull harder</h2>
+  <div class="race" data-race="road" style="margin-top:34px">
+    <div class="panels">
+      <div class="panel"><div class="panel-head"><span class="alg d"><i></i>Dijkstra</span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+      <div class="panel"><div class="panel-head"><span class="alg a"><i></i>A* · ALT, K = <span data-k>8</span></span><span class="count"><small>settled</small><span data-count>0</span></span></div><canvas></canvas></div>
+    </div>
+    <div class="race-foot">
+      <button class="btn" data-replay>Replay</button><button class="btn" data-play>Pause</button>
+      <span class="seg" role="group" aria-label="Number of landmarks"><button class="btn" data-kbtn="1">K = 1</button><button class="btn" data-kbtn="4">K = 4</button><button class="btn" data-kbtn="8" aria-pressed="true">K = 8</button><button class="btn" data-kbtn="16">K = 16</button></span>
+      <span class="race-sum" data-sum></span>
+    </div>
+  </div>
+  <div class="legend" style="margin-top:18px"><span><svg width="18" height="16" aria-hidden="true"><path d="M9 1 L17 15 L1 15 Z" fill="#17191b"/></svg>landmark in use</span><span><i class="sw" style="background:var(--ink);height:5px"></i>shortest path</span><span>the real graph has 1.96 M vertices; the numbers on the next slide come from it</span></div>
+</section>
+
+<!-- 18 · road results -->
+<section class="slide" data-section="Road network">
+  <div class="kicker"><span>Road network · results</span><span class="src">roadNet-CA · 30 queries × 5 repeats · ratio Dijkstra ÷ A*, log scale</span></div>
+  <h2 class="h">More landmarks, more savings, with no plateau at 16</h2>
+  <div class="body" style="gap:72px;margin-top:30px">
+    <div style="width:1080px;flex:none" data-chart="road"></div>
+    <div class="side" style="gap:26px;padding-top:10px">
+      <p><b>K = 1</b> halves the expansions, but the time gain is small: not significant here (p = 0.13), 1.41× with p = 0.007 on the second machine.</p>
+      <p><b>K = 16 vs K = 8</b> on the same queries: 21% less time and 25% fewer expansions (p &lt; 10⁻⁴). The predicted plateau did not appear.</p>
+      <p><b>Long queries</b> (K = 8): Dijkstra 448 ms, A* 99 ms.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 19 · informativeness -->
+<section class="slide" data-section="Extensions">
+  <div class="kicker"><span>Exploratory · what makes a heuristic informative</span><span class="src">300 grid queries · error measured on 5,000 sampled vertices each</span></div>
+  <h2 class="h">Admissible is not enough: the guess has to be close</h2>
+  <div class="body" style="gap:64px;margin-top:26px">
+    <div style="width:1060px;flex:none" data-chart="scatter"></div>
+    <div class="side" style="padding-top:16px">
+      <p><b>Heuristic error</b> = mean |true distance − h| ÷ mean true distance, from a reverse BFS from the target.</p>
+      <p>Spearman correlation with the speed-up: <b>−0.81</b> (−0.83 on the second machine). A straight-line fit on this one number explains 55% of the spread in log speed-up.</p>
+      <p>Maze: error <b>0.97</b>, so h is almost useless. Roads with ALT K = 8: error <b>0.155</b>, rank correlation with the true distance <b>0.98</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 20 · weighted -->
+<section class="slide" data-section="Extensions">
+  <div class="kicker"><span>Exploratory · weighted A* in perfect mazes</span><span class="src">original run · f = g + ε·h · time ratio Dijkstra ÷ weighted A*, 15 queries per point</span></div>
+  <h2 class="h">In large mazes a greedier A* wins, and the path stays optimal</h2>
+  <div class="body" style="gap:64px;margin-top:30px">
+    <div style="width:1060px;flex:none" data-chart="weighted"></div>
+    <div class="side" style="padding-top:16px">
+      <p>Multiplying h by ε makes A* chase the target harder. It loses the guarantee of a shortest path.</p>
+      <p>A perfect maze has exactly one route between two cells, so the path cost stayed <b>1.00 at every ε</b>.</p>
+      <p>At 1024², ε = 50 is <b>1.68× faster</b> than Dijkstra (short queries 3.43×). At 128² it was still slower (0.86×), but 1.14× faster on the second machine, so the small-maze result is not stable.</p>
+      <p>With alternative routes, ε would trade path length for speed.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 21 · OpenMP -->
+<section class="slide" data-section="Extensions">
+  <div class="kicker"><span>Exploratory · many queries at once</span><span class="src">5 grids at 1024² + 30 road queries · 270 tasks per batch</span></div>
+  <h2 class="h">Parallel batches: throughput scales, the A* advantage holds</h2>
+  <div class="body" style="gap:64px;margin-top:30px">
+    <div style="width:1000px;flex:none" data-chart="omp"></div>
+    <div class="side" style="padding-top:16px">
+      <p>Each search stays sequential. OpenMP hands whole queries to threads, each with its own scratch memory and heuristic.</p>
+      <p><b>16 threads: 9.73×</b> throughput (61% efficiency) on the original machine; <b>12 threads: 7.18×</b> (60%) on the M4 Pro.</p>
+      <p>The median Dijkstra ÷ A* time ratio stays put under load: 14.8× → 17.9× and 14.6× → 15.4×. The maze stays below 1.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 22 · replication -->
+<section class="slide" data-section="Verdict">
+  <div class="kicker"><span>Replication on a second machine</span><span class="src">same code, same seeds, full pipeline rerun</span></div>
+  <h2 class="h">A second machine confirms the main effects, not the small ones</h2>
+  <div class="body" style="gap:72px;margin-top:34px">
+    <div style="width:1100px;flex:none">
+      <table class="t" id="repl-table">
+        <thead><tr><th>Graph</th><th class="n">time ratio<br>original</th><th class="n">time ratio<br>replication</th><th class="n">expansions<br>original</th><th class="n">expansions<br>replication</th></tr></thead>
+        <tbody>
+          <tr><td>open</td><td class="n">106×</td><td class="n"><b>209×</b></td><td class="n">222×</td><td class="n">257×</td></tr>
+          <tr><td>random</td><td class="n">12.8×</td><td class="n"><b>15.6×</b></td><td class="n">21.4×</td><td class="n">22.2×</td></tr>
+          <tr><td>clustered</td><td class="n">12.8×</td><td class="n"><b>12.5×</b></td><td class="n">22.9×</td><td class="n">20.8×</td></tr>
+          <tr><td>rooms</td><td class="n">8.7×</td><td class="n"><b>8.6×</b></td><td class="n">14.3×</td><td class="n">12.9×</td></tr>
+          <tr><td>maze</td><td class="n">0.81×</td><td class="n"><b>0.79×</b></td><td class="n">1.02×</td><td class="n">1.01×</td></tr>
+          <tr><td>roads, ALT K = 1</td><td class="n">1.29×</td><td class="n"><b>1.41×</b></td><td class="n">1.96×</td><td class="n">2.28×</td></tr>
+          <tr><td>roads, ALT K = 4</td><td class="n">4.75×</td><td class="n"><b>7.93×</b></td><td class="n">7.27×</td><td class="n">11.2×</td></tr>
+          <tr><td>roads, ALT K = 8</td><td class="n">7.62×</td><td class="n"><b>10.6×</b></td><td class="n">11.5×</td><td class="n">14.6×</td></tr>
+          <tr><td>roads, ALT K = 16</td><td class="n">13.5×</td><td class="n"><b>15.0×</b></td><td class="n">22.4×</td><td class="n">24.1×</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="side" style="padding-top:6px;gap:16px;font-size:22px">
+      <p><b>Original:</b> Intel Core Ultra 9 285H, Ubuntu on WSL2, GCC 13. <b>Replication:</b> Apple M4 Pro, macOS, Apple Clang 21.</p>
+      <p>Same seeds, but the two standard libraries draw different random grids and queries, so this is a new sample. The road graph and landmark files were byte-identical (same SHA-256).</p>
+      <p><b>Held:</b> the order of the five families, the maze slowdown, more landmarks always better, error vs speed-up (ρ = −0.83), 3,600 of 3,600 runs correct.</p>
+      <p><b>Moved:</b> one A* step costs only 1.3–1.6× on the M4 Pro, so open-grid A* gained 209×.</p>
+      <p><b>Did not hold:</b> the distance-band trends, weighted A* on the smallest mazes, the tie-break median.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 23 · hypotheses -->
+<section class="slide" data-section="Verdict">
+  <div class="kicker"><span>Pre-registered hypotheses</span><span class="src">HYPOTHESES.md, written before the main run</span></div>
+  <h2 class="h">What held on both machines, and what did not</h2>
+  <table class="t" style="margin-top:30px;font-size:21px">
+    <thead><tr><th style="width:62px">#</th><th style="width:470px">Prediction</th><th>Original run</th><th style="width:400px">Second machine</th><th style="width:250px">Verdict</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">H1</td><td>Open grid: large saving in expansions, smaller in time</td><td>222× fewer, 106× faster, 100% of queries</td><td>257× fewer, 209× faster, 100%</td><td><span class="verdict good">Confirmed</span></td></tr>
+      <tr><td class="mono">H2</td><td>Random walls: clear win, smaller than open</td><td>21.4× fewer, 12.8× faster, 98%</td><td>22.2× fewer, 15.6× faster, 100%</td><td><span class="verdict good">Confirmed</span></td></tr>
+      <tr><td class="mono">H3</td><td>Rooms and clusters save less than open; rooms less than random</td><td>Pooled 14.3× vs 21.4×; fails at 512²</td><td>Pooled 12.9× vs 22.2×; fails at 1024²</td><td><span class="verdict good">Confirmed, pooled</span></td></tr>
+      <tr><td class="mono">H4</td><td>Maze: equal expansions, A* slower</td><td>1.02× fewer, 0.81× time</td><td>1.01× fewer, 0.79× time</td><td><span class="verdict good">Confirmed</span></td></tr>
+      <tr><td class="mono">H5</td><td>Long queries save more than short on open and random</td><td>Random long 21.6× &lt; short 22.2×</td><td>Random long 26.8× &gt; short 20.9×</td><td><span class="verdict warn">Not robust</span></td></tr>
+      <tr><td class="mono">H6</td><td>ALT: K = 8 wins, K = 1 weak, K = 16 plateaus</td><td>7.6×; K = 1 n.s.; K = 16 beats K = 8</td><td>10.6×; K = 1 1.41×; K = 16 beats K = 8</td><td><span class="verdict warn">Partly: no plateau</span></td></tr>
+      <tr><td class="mono">H7</td><td>larger_g lowers the median expansions on open grids</td><td>Median 1.00, tail 286×</td><td>Median 35.8×: more targets below</td><td><span class="verdict warn">Median not robust</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 24 · threats -->
+<section class="slide" data-section="Verdict">
+  <div class="kicker"><span>Threats to validity</span><span class="src">what these results do not show</span></div>
+  <h2 class="h">Where the conclusions stop</h2>
+  <table class="t" style="margin-top:40px;font-size:25px">
+    <tbody>
+      <tr><td style="width:520px"><b>One real graph, hop counts</b></td><td>SNAP gives no road lengths or travel times. Weighted routing could behave differently.</td></tr>
+      <tr><td><b>Synthetic grids</b></td><td>Each family isolates one structure. They are controls, not a sample of real maps.</td></tr>
+      <tr><td><b>Two-way roads</b></td><td>The road graph was symmetrised; one-way streets are not modelled.</td></tr>
+      <tr><td><b>One implementation</b></td><td>Binary heap with lazy deletion for both. Another priority queue changes the constant per step.</td></tr>
+      <tr><td><b>Few queries per cell</b></td><td>5 to 10 queries per size and distance band. Effects at that level did not replicate; only family-level results are claimed.</td></tr>
+      <tr><td><b>Wall-clock time</b></td><td>Absolute times depend on the machine; paired ratios, medians, bootstrap intervals and a second machine are the defence.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 25 · answer -->
+<section class="slide" data-section="Verdict">
+  <div class="kicker"><span>The answer</span><span class="src">T01 · When does A* save work?</span></div>
+  <p class="big-statement" style="margin-top:28px">A* saves time when its heuristic removes more expansions than it adds cost to each one.</p>
+  <table class="t" style="margin-top:52px;font-size:24px">
+    <thead><tr><th style="width:560px">Situation</th><th style="width:420px">Use</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Open or lightly obstructed grid</td><td><span class="alg a" style="font-size:24px"><i></i>A*, Manhattan</span></td><td>12.8× to 106× faster</td></tr>
+      <tr><td>Rooms, clustered obstacles</td><td><span class="alg a" style="font-size:24px"><i></i>A*, Manhattan</span></td><td>8.7× to 12.8× faster</td></tr>
+      <tr><td>Road network with 8 or more landmarks</td><td><span class="alg a" style="font-size:24px"><i></i>A*, ALT</span></td><td>7.6× (K = 8) to 13.5× (K = 16) faster</td></tr>
+      <tr><td>Perfect maze, long winding corridors</td><td><span class="alg d" style="font-size:24px"><i></i>Dijkstra</span></td><td>A* is 24% slower; weighted A* helps only on large mazes</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<div class="foot" id="foot">
+  <span>T01 · When does A* save work?</span>
+  <span class="mid" id="foot-sec"></span>
+  <span class="nav"><button class="navbtn" id="prev" aria-label="Previous slide">←</button><span class="num" id="foot-num">01 / 25</span><button class="navbtn" id="next" aria-label="Next slide">→</button></span>
+</div>
+
+</div>
+</div>
+
+<script>
+/*ENGINE-START*/
+const GW = 63, GH = 35;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function cellId(r, c) { return r * GW + c; }
+
+// The five grid families, following src/grid.cpp at illustration scale.
+function genBlocked(family, seed) {
+  const n = GW * GH, b = new Uint8Array(n), rnd = mulberry32(seed);
+  if (family === 'random') {
+    for (let i = 0; i < n; i++) b[i] = rnd() < 0.2 ? 1 : 0;
+  } else if (family === 'clustered') {
+    const target = Math.floor(0.3 * n);
+    let count = 0, tries = 0;
+    while (count < target && tries++ < 100000) {
+      const cx = Math.floor(rnd() * GW), cy = Math.floor(rnd() * GH), rad = 2 + Math.floor(rnd() * 3);
+      for (let dy = -rad; dy <= rad && count < target; dy++) {
+        for (let dx = -rad; dx <= rad && count < target; dx++) {
+          if (dx * dx + dy * dy > rad * rad) continue;
+          const x = cx + dx, y = cy + dy;
+          if (x < 0 || y < 0 || x >= GW || y >= GH) continue;
+          const i = y * GW + x;
+          if (!b[i] && rnd() < 0.85) { b[i] = 1; count++; }
+        }
+      }
+    }
+  } else if (family === 'rooms') {
+    const R = 8;
+    for (let x = R; x < GW; x += R) {
+      for (let y0 = 0; y0 < GH; y0 += R) {
+        const y1 = Math.min(GH, y0 + R);
+        if (y1 <= y0 + 1) continue;
+        const first = y0 + 1, last = y1 - 1, door = first + Math.floor(rnd() * (last - first + 1));
+        for (let y = first; y <= last; y++) if (y !== door) b[y * GW + x] = 1;
+      }
+    }
+    for (let y = R; y < GH; y += R) {
+      for (let x0 = 0; x0 < GW; x0 += R) {
+        const x1 = Math.min(GW, x0 + R);
+        if (x1 <= x0 + 1) continue;
+        const first = x0 + 1, last = x1 - 1, door = first + Math.floor(rnd() * (last - first + 1));
+        for (let x = first; x <= last; x++) if (x !== door) b[y * GW + x] = 1;
+      }
+    }
+    for (let y = R; y < GH; y += R) for (let x = R; x < GW; x += R) b[y * GW + x] = 1;
+  } else if (family === 'maze') {
+    b.fill(1);
+    const vis = new Uint8Array(n), start = cellId(1, 1), stack = [start];
+    vis[start] = 1; b[start] = 0;
+    const D = [[-2, 0], [2, 0], [0, -2], [0, 2]];
+    while (stack.length) {
+      const cur = stack[stack.length - 1], cx = cur % GW, cy = (cur / GW) | 0;
+      const order = [0, 1, 2, 3];
+      for (let i = 3; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const tmp = order[i]; order[i] = order[j]; order[j] = tmp; }
+      let advanced = false;
+      for (const d of order) {
+        const nx = cx + D[d][0], ny = cy + D[d][1];
+        if (nx <= 0 || ny <= 0 || nx >= GW - 1 || ny >= GH - 1) continue;
+        const next = ny * GW + nx;
+        if (vis[next]) continue;
+        b[(cy + D[d][1] / 2) * GW + (cx + D[d][0] / 2)] = 0;
+        b[next] = 0; vis[next] = 1; stack.push(next); advanced = true;
+        break;
+      }
+      if (!advanced) stack.pop();
+    }
+  }
+  return b;
+}
+
+// CSR graph of the free cells; a wall is an isolated vertex, as in the C++ code.
+function gridGraph(b) {
+  const n = GW * GH, off = new Int32Array(n + 1), tg = [];
+  for (let v = 0; v < n; v++) {
+    off[v] = tg.length;
+    if (b[v]) continue;
+    const r = (v / GW) | 0, c = v % GW;
+    if (r > 0 && !b[v - GW]) tg.push(v - GW);
+    if (c > 0 && !b[v - 1]) tg.push(v - 1);
+    if (c < GW - 1 && !b[v + 1]) tg.push(v + 1);
+    if (r < GH - 1 && !b[v + GW]) tg.push(v + GW);
+  }
+  off[n] = tg.length;
+  return { n, off, tg: Int32Array.from(tg) };
+}
+
+function bfs(G, s) {
+  const d = new Int32Array(G.n).fill(-1), q = new Int32Array(G.n);
+  let head = 0, tail = 0;
+  d[s] = 0; q[tail++] = s;
+  while (head < tail) {
+    const u = q[head++];
+    for (let i = G.off[u]; i < G.off[u + 1]; i++) {
+      const w = G.tg[i];
+      if (d[w] < 0) { d[w] = d[u] + 1; q[tail++] = w; }
+    }
+  }
+  return d;
+}
+
+const START = cellId(9, 5), GOAL = cellId(25, 57);
+
+function makeCase(family, seed, s = START, t = GOAL) {
+  for (let k = 0; k < 500; k++) {
+    const b = genBlocked(family, seed + k);
+    if (family !== 'maze') { b[s] = 0; b[t] = 0; }
+    const G = gridGraph(b);
+    if (bfs(G, s)[t] > 0) return { b, G, s, t, seed: seed + k };
+  }
+  throw new Error('no connected instance for ' + family);
+}
+
+function manhattanTo(t) {
+  const tr = (t / GW) | 0, tc = t % GW;
+  return v => Math.abs(((v / GW) | 0) - tr) + Math.abs(v % GW - tc);
+}
+
+// One routine for both algorithms, like shortest_path() in src/search.cpp:
+// h = null is Dijkstra.  Binary heap with lazy deletion; ties by (f, -g, id) or (f, id).
+function search(G, s, t, h, largerG = true) {
+  const n = G.n, INF = 1e9;
+  const g = new Int32Array(n).fill(INF), closed = new Uint8Array(n), par = new Int32Array(n).fill(-1);
+  const hf = [], hg = [], hv = [];
+  const less = (i, j) => {
+    if (hf[i] !== hf[j]) return hf[i] < hf[j];
+    if (largerG && hg[i] !== hg[j]) return hg[i] > hg[j];
+    if (hv[i] !== hv[j]) return hv[i] < hv[j];
+    return hg[i] < hg[j];
+  };
+  const swap = (i, j) => {
+    let x = hf[i]; hf[i] = hf[j]; hf[j] = x;
+    x = hg[i]; hg[i] = hg[j]; hg[j] = x;
+    x = hv[i]; hv[i] = hv[j]; hv[j] = x;
+  };
+  const push = (f, gg, v) => {
+    hf.push(f); hg.push(gg); hv.push(v);
+    let i = hf.length - 1;
+    while (i > 0) { const p = (i - 1) >> 1; if (!less(i, p)) break; swap(i, p); i = p; }
+  };
+  const pop = () => {
+    const out = [hf[0], hg[0], hv[0]], last = hf.length - 1;
+    if (last > 0) { hf[0] = hf[last]; hg[0] = hg[last]; hv[0] = hv[last]; }
+    hf.pop(); hg.pop(); hv.pop();
+    const m = hf.length;
+    let i = 0;
+    for (;;) {
+      const l = 2 * i + 1, r = l + 1;
+      let best = i;
+      if (l < m && less(l, best)) best = l;
+      if (r < m && less(r, best)) best = r;
+      if (best === i) break;
+      swap(i, best); i = best;
+    }
+    return out;
+  };
+  const H = h ? h : () => 0;
+  const exp = [], pstart = [], plist = [];
+  let found = false, pushes = 1;
+  g[s] = 0; push(H(s), 0, s);
+  while (hf.length) {
+    const [, gg, u] = pop();
+    if (gg !== g[u] || closed[u]) continue;
+    closed[u] = 1; exp.push(u); pstart.push(plist.length);
+    if (u === t) { found = true; break; }
+    for (let i = G.off[u]; i < G.off[u + 1]; i++) {
+      const w = G.tg[i];
+      if (closed[w]) continue;
+      const c = gg + 1;
+      if (c >= g[w]) continue;
+      g[w] = c; par[w] = u;
+      push(c + H(w), c, w); plist.push(w); pushes++;
+    }
+  }
+  pstart.push(plist.length);
+  const path = [];
+  if (found) { for (let v = t; v !== -1; v = par[v]) path.push(v); path.reverse(); }
+  return { exp, pstart, plist, path, dist: found ? g[t] : -1, pushes };
+}
+
+// A street-like graph: jittered lattice, a few diagonals, two lakes; largest component; unit weights.
+function makeRoad(seed) {
+  const rnd = mulberry32(seed), cols = 40, rows = 22;
+  const id = new Int32Array(cols * rows).fill(-1), xs = [], ys = [];
+  const inLake = (x, y) =>
+    ((x - 0.52) / 0.11) ** 2 + ((y - 0.40) / 0.30) ** 2 < 1 ||
+    ((x - 0.25) / 0.075) ** 2 + ((y - 0.80) / 0.13) ** 2 < 1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = (c + 0.5 + (rnd() - 0.5) * 0.5) / cols, y = (r + 0.5 + (rnd() - 0.5) * 0.5) / rows;
+      if (inLake(x, y) || rnd() < 0.05) continue;
+      id[r * cols + c] = xs.length; xs.push(x); ys.push(y);
+    }
+  }
+  const adj = xs.map(() => []);
+  const link = (a, b) => { if (a < 0 || b < 0) return; adj[a].push(b); adj[b].push(a); };
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const a = id[r * cols + c];
+      const pr = rnd(), pd = rnd(), pq = rnd(), pl = rnd();
+      if (a < 0) continue;
+      if (c + 1 < cols && pr < 0.92) link(a, id[r * cols + c + 1]);
+      if (r + 1 < rows && pd < 0.92) link(a, id[(r + 1) * cols + c]);
+      if (r + 1 < rows && c + 1 < cols && pq < 0.05) link(a, id[(r + 1) * cols + c + 1]);
+      if (r + 1 < rows && c > 0 && pl < 0.05) link(a, id[(r + 1) * cols + c - 1]);
+    }
+  }
+  const comp = new Int32Array(xs.length).fill(-1);
+  let best = -1, bestSize = 0, label = 0;
+  for (let v = 0; v < xs.length; v++) {
+    if (comp[v] >= 0) continue;
+    const q = [v]; comp[v] = label;
+    for (let i = 0; i < q.length; i++) for (const w of adj[q[i]]) if (comp[w] < 0) { comp[w] = label; q.push(w); }
+    if (q.length > bestSize) { bestSize = q.length; best = label; }
+    label++;
+  }
+  const map = new Int32Array(xs.length).fill(-1), X = [], Y = [];
+  for (let v = 0; v < xs.length; v++) if (comp[v] === best) { map[v] = X.length; X.push(xs[v]); Y.push(ys[v]); }
+  const n = X.length, off = new Int32Array(n + 1), tg = [];
+  for (let v = 0, k = 0; v < xs.length; v++) {
+    if (map[v] < 0) continue;
+    off[k++] = tg.length;
+    for (const w of adj[v]) tg.push(map[w]);
+  }
+  off[n] = tg.length;
+  return { n, off, tg: Int32Array.from(tg), x: X, y: Y };
+}
+
+function nearestNode(R, px, py) {
+  let best = 0, bd = Infinity;
+  for (let v = 0; v < R.n; v++) {
+    const dx = (R.x[v] - px) * 1.8, dy = R.y[v] - py, d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = v; }
+  }
+  return best;
+}
+
+// Farthest-point landmarks and their BFS tables, as select_landmarks() in src/heuristic.cpp.
+function selectLandmarks(R, k, seed) {
+  const ids = [], dist = [], minD = new Int32Array(R.n).fill(1e9);
+  let cur = seed % R.n;
+  for (let l = 0; l < k; l++) {
+    const d = bfs(R, cur);
+    ids.push(cur); dist.push(d);
+    for (let v = 0; v < R.n; v++) if (d[v] >= 0 && d[v] < minD[v]) minD[v] = d[v];
+    let next = -1, bestD = 0;
+    for (let v = 0; v < R.n; v++) if (minD[v] < 1e9 && minD[v] > bestD) { bestD = minD[v]; next = v; }
+    cur = next < 0 ? cur : next;
+  }
+  return { ids, dist };
+}
+
+function altTo(L, K, t) {
+  const dt = [];
+  for (let i = 0; i < K; i++) dt.push(L.dist[i][t]);
+  return v => {
+    let b = 0;
+    for (let i = 0; i < K; i++) { const x = Math.abs(L.dist[i][v] - dt[i]); if (x > b) b = x; }
+    return b;
+  };
+}
+/*ENGINE-END*/
+const SCATTER_PTS = [["o",0.0,26.61],["o",0.0,36.301],["o",0.0,45.456],["o",0.0,26.526],["o",0.0,48.717],["o",0.0,42.373],["o",0.0,24.479],["o",0.0,56.365],["o",0.0,50.151],["o",0.0,16.245],["o",0.0,50.096],["o",0.0,51.148],["o",0.0,32.155],["o",0.0,78.455],["o",0.0,82.718],["o",0.0,57.961],["o",0.0,98.058],["o",0.0,64.723],["o",0.0,43.112],["o",0.0,139.672],["o",0.0,145.888],["o",0.0,42.933],["o",0.0,83.548],["o",0.0,56.101],["o",0.0,49.553],["o",0.0,75.07],["o",0.0,82.38],["o",0.0,76.014],["o",0.0,105.647],["o",0.0,97.525],["o",0.0,105.668],["o",0.0,183.439],["o",0.0,321.907],["o",0.0,166.978],["o",0.0,274.695],["o",0.0,305.577],["o",0.0,90.905],["o",0.0,170.71],["o",0.0,177.357],["o",0.0,174.877],["o",0.0,248.071],["o",0.0,252.834],["o",0.0,97.701],["o",0.0,160.04],["o",0.0,192.322],["o",0.0,181.499],["o",0.0,486.832],["o",0.0,166.074],["o",0.0,389.849],["o",0.0,444.327],["o",0.0,312.4],["o",0.0,210.194],["o",0.0,481.974],["o",0.0,585.482],["o",0.0,490.064],["o",0.0,562.608],["o",0.0,464.212],["o",0.0,220.8],["o",0.0,377.635],["o",0.0,295.653],["r",0.0246,4.473],["r",0.0343,12.251],["r",0.0365,3.786],["r",0.0197,18.067],["r",0.0213,46.333],["r",0.0259,10.723],["r",0.0369,8.389],["r",0.0398,2.942],["r",0.0647,0.658],["r",0.0328,21.775],["r",0.0329,12.144],["r",0.0375,2.064],["r",0.0215,26.488],["r",0.0264,22.228],["r",0.0261,12.016],["r",0.0272,8.657],["r",0.0256,5.923],["r",0.027,11.275],["r",0.0258,15.302],["r",0.0269,6.436],["r",0.0454,2.046],["r",0.0216,14.056],["r",0.0252,10.853],["r",0.0186,11.633],["r",0.0232,17.778],["r",0.0228,25.73],["r",0.0201,6.396],["r",0.0296,7.911],["r",0.0202,48.857],["r",0.0219,17.671],["r",0.0169,31.591],["r",0.0236,12.742],["r",0.0197,13.537],["r",0.017,18.426],["r",0.021,11.188],["r",0.0211,3.854],["r",0.0195,7.363],["r",0.0235,2.422],["r",0.0197,6.012],["r",0.0152,75.32],["r",0.0184,48.878],["r",0.0191,49.151],["r",0.0242,4.766],["r",0.0242,2.413],["r",0.0215,16.306],["r",0.021,11.751],["r",0.0182,21.781],["r",0.0178,47.829],["r",0.0142,23.325],["r",0.0175,12.937],["r",0.0176,129.894],["r",0.0164,14.233],["r",0.0193,283.538],["r",0.0185,10.648],["r",0.0171,14.588],["r",0.0146,26.484],["r",0.0185,38.309],["r",0.0192,6.811],["r",0.015,20.971],["r",0.0189,17.087],["c",0.0824,5.599],["c",0.0801,3.262],["c",0.0389,13.957],["c",0.0443,6.527],["c",0.0799,20.079],["c",0.1289,10.201],["c",0.0743,13.529],["c",0.0301,11.884],["c",0.1227,1.489],["c",0.0853,10.529],["c",0.1185,3.857],["c",0.089,33.702],["c",0.1285,8.769],["c",0.0695,3.084],["c",0.0366,4.496],["c",0.0437,9.194],["c",0.0324,6.714],["c",0.0815,10.737],["c",0.0278,9.186],["c",0.092,2.397],["c",0.0346,9.559],["c",0.0339,7.833],["c",0.0139,12.96],["c",0.0246,8.169],["c",0.034,11.166],["c",0.061,36.124],["c",0.04,21.114],["c",0.0297,5.466],["c",0.0441,57.21],["c",0.1538,2.223],["c",0.0239,44.907],["c",0.0155,47.278],["c",0.0297,12.42],["c",0.0409,22.894],["c",0.0303,105.914],["c",0.0335,6.207],["c",0.0408,12.658],["c",0.0253,129.212],["c",0.0334,13.754],["c",0.0305,96.073],["c",0.036,15.128],["c",0.0274,85.51],["c",0.0159,34.037],["c",0.0371,41.115],["c",0.0311,0.717],["c",0.0523,21.7],["c",0.0658,13.424],["c",0.0234,151.117],["c",0.0873,52.458],["c",0.0471,98.775],["c",0.0198,263.656],["c",0.0684,2.618],["c",0.047,3.794],["c",0.0278,29.627],["c",0.0264,146.724],["c",0.0392,7.057],["c",0.0296,11.634],["c",0.0492,25.155],["c",0.0538,21.143],["c",0.0255,39.052],["m",0.094,10.802],["m",0.0451,56.934],["m",0.1069,2.868],["m",0.0899,5.641],["m",0.1005,1.805],["m",0.0784,22.083],["m",0.0567,7.708],["m",0.0754,51.156],["m",0.0842,36.572],["m",0.1164,7.6],["m",0.1102,3.99],["m",0.0931,3.901],["m",0.1149,17.549],["m",0.083,2.11],["m",0.0705,1.507],["m",0.0912,10.172],["m",0.0642,7.434],["m",0.0173,8.889],["m",0.0581,7.177],["m",0.0831,6.275],["m",0.0625,29.021],["m",0.0913,7.107],["m",0.0751,5.625],["m",0.0685,10.029],["m",0.0612,11.922],["m",0.0701,4.6],["m",0.0708,34.054],["m",0.074,3.972],["m",0.0594,16.791],["m",0.0543,8.718],["m",0.0736,19.61],["m",0.0514,6.242],["m",0.0486,24.299],["m",0.0506,17.718],["m",0.0567,14.801],["m",0.033,100.348],["m",0.0642,10.552],["m",0.0478,6.156],["m",0.0516,5.439],["m",0.056,5.409],["m",0.0486,3.84],["m",0.0518,11.402],["m",0.0521,49.938],["m",0.0504,13.385],["m",0.0294,5.896],["m",0.0491,11.368],["m",0.0439,7.872],["m",0.0447,8.957],["m",0.0429,10.557],["m",0.0411,8.252],["m",0.0439,44.772],["m",0.0413,10.425],["m",0.048,8.737],["m",0.0396,29.966],["m",0.0506,4.214],["m",0.0485,2.328],["m",0.0414,2.228],["m",0.0456,5.706],["m",0.0426,121.31],["m",0.045,4.691],["z",0.895,0.78],["z",0.9558,0.804],["z",0.9498,0.797],["z",0.9324,0.816],["z",0.8972,0.745],["z",0.9466,0.575],["z",0.9317,0.716],["z",0.9065,0.701],["z",0.936,0.697],["z",0.9151,0.865],["z",0.9201,0.73],["z",0.937,0.779],["z",0.9353,0.78],["z",0.9009,0.679],["z",0.9434,0.68],["z",0.9546,0.787],["z",0.9651,0.745],["z",0.9727,0.705],["z",0.9627,0.791],["z",0.9633,0.63],["z",0.971,0.762],["z",0.9681,0.777],["z",0.9459,0.78],["z",0.9558,0.81],["z",0.9656,0.653],["z",0.9427,0.477],["z",0.9716,0.773],["z",0.9669,0.953],["z",0.9467,0.747],["z",0.9723,0.775],["z",0.974,0.863],["z",0.9754,0.864],["z",0.9822,0.879],["z",0.9668,0.78],["z",0.9806,1.038],["z",0.9816,0.892],["z",0.9789,0.824],["z",0.9756,0.723],["z",0.9811,1.034],["z",0.983,0.938],["z",0.9698,0.692],["z",0.9819,1.052],["z",0.9712,0.814],["z",0.9675,0.701],["z",0.981,1.245],["z",0.9797,0.97],["z",0.9881,0.928],["z",0.985,0.926],["z",0.9764,0.982],["z",0.9789,1.013],["z",0.9858,1.004],["z",0.9801,1.002],["z",0.9783,0.936],["z",0.987,1.079],["z",0.9788,1.049],["z",0.9867,0.962],["z",0.9864,0.935],["z",0.9869,0.928],["z",0.9828,0.958],["z",0.9853,1.042]];
+
+
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const fmt = n => Math.round(n).toLocaleString('en-US');
+  const COL = {
+    surface: '#fcfcfa', ink: '#17191b', wall: '#3a3d41', grid: '#e8e8e2', edge: '#cfd1ca',
+    dij: '#2a78d6', dijT: '#bdd5f3', dijM: '#7fb0ea', ast: '#eb6834', astT: '#f6c8b1', astM: '#f2a07c'
+  };
+  // Instances chosen as typical: their Dijkstra/A* ratio sits near the median over 40 seeds.
+  const SEEDS = { open: 1, random: 17, clustered: 2, rooms: 6, maze: 21, road: 20261030 };
+
+  const stage = $('#stage'), vp = $('#viewport');
+  let scale = 1;
+  const views = [];
+
+  /* ---------- canvas views ---------- */
+  function setupCanvas(cv) {
+    const w = cv.offsetWidth, h = cv.offsetHeight;
+    const r = Math.min(3, Math.max(1, (window.devicePixelRatio || 1) * scale));
+    cv.width = Math.max(1, Math.round(w * r)); cv.height = Math.max(1, Math.round(h * r));
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(cv.width / w, 0, 0, cv.height / h, 0, 0);
+    return { ctx, w, h };
+  }
+
+  class GridView {
+    constructor(cv, kase, scheme) {
+      this.cv = cv; this.k = kase; this.sc = scheme; this.res = null; this.shown = 0; this.pathOn = false;
+      views.push(this);
+    }
+    resize() { if (!this.cv.offsetWidth) return; Object.assign(this, setupCanvas(this.cv)); this.cs = this.w / GW; this.redraw(); }
+    rect(v, inset) {
+      const cs = this.cs, r = (v / GW) | 0, c = v % GW;
+      return [c * cs + inset, r * cs + inset, cs - 2 * inset, cs - 2 * inset];
+    }
+    center(v) { const cs = this.cs; return [(v % GW + 0.5) * cs, (((v / GW) | 0) + 0.5) * cs]; }
+    base() {
+      const { ctx, w, h, cs } = this, b = this.k.b;
+      ctx.fillStyle = COL.surface; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = COL.grid; ctx.lineWidth = 1; ctx.beginPath();
+      for (let c = 1; c < GW; c++) { ctx.moveTo(c * cs, 0); ctx.lineTo(c * cs, h); }
+      for (let r = 1; r < GH; r++) { ctx.moveTo(0, r * cs); ctx.lineTo(w, r * cs); }
+      ctx.stroke();
+      ctx.fillStyle = COL.wall;
+      for (let v = 0; v < b.length; v++) if (b[v]) { const [x, y] = this.rect(v, 0); ctx.fillRect(x - 0.3, y - 0.3, cs + 0.6, cs + 0.6); }
+    }
+    drawRange(a, z) {
+      const { ctx, res, sc } = this, cs = this.cs;
+      for (let k = a; k < z; k++) {
+        ctx.fillStyle = sc.tint;
+        const [x, y, ww, hh] = this.rect(res.exp[k], 0.6); ctx.fillRect(x, y, ww, hh);
+        ctx.fillStyle = sc.mark;
+        for (let i = res.pstart[k]; i < res.pstart[k + 1]; i++) { const [px, py, pw, ph] = this.rect(res.plist[i], cs * 0.3); ctx.fillRect(px, py, pw, ph); }
+      }
+      this.markers();
+    }
+    drawPath() {
+      const { ctx, res } = this; if (!res.path.length) return;
+      ctx.strokeStyle = COL.ink; ctx.lineWidth = Math.max(2.5, this.cs * 0.32); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath(); res.path.forEach((v, i) => { const [x, y] = this.center(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+      this.markers();
+    }
+    markers() {
+      const { ctx } = this, cs = this.cs;
+      const [sx, sy] = this.center(this.k.s), [tx, ty] = this.center(this.k.t);
+      ctx.fillStyle = COL.ink; ctx.beginPath(); ctx.arc(sx, sy, cs * 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = COL.surface; ctx.beginPath(); ctx.arc(tx, ty, cs * 0.62, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = COL.ink; ctx.lineWidth = Math.max(2, cs * 0.18); ctx.beginPath(); ctx.arc(tx, ty, cs * 0.5, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = COL.ink; ctx.beginPath(); ctx.arc(tx, ty, cs * 0.17, 0, Math.PI * 2); ctx.fill();
+    }
+    redraw() {
+      if (!this.ctx) return;
+      this.base();
+      if (this.res) { this.drawRange(0, this.shown); if (this.pathOn) this.drawPath(); }
+      this.markers();
+    }
+  }
+
+  class RoadView {
+    constructor(cv, R, scheme) {
+      this.cv = cv; this.R = R; this.sc = scheme; this.res = null; this.shown = 0; this.pathOn = false; this.lm = [];
+      this.s = 0; this.t = 0; views.push(this);
+    }
+    get k() { return { s: this.s, t: this.t }; }
+    resize() { if (!this.cv.offsetWidth) return; Object.assign(this, setupCanvas(this.cv)); this.redraw(); }
+    P(v) { return [this.R.x[v] * this.w, this.R.y[v] * this.h]; }
+    base() {
+      const { ctx, w, h, R } = this;
+      ctx.fillStyle = COL.surface; ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = COL.edge; ctx.lineWidth = 1.4; ctx.beginPath();
+      for (let v = 0; v < R.n; v++) for (let i = R.off[v]; i < R.off[v + 1]; i++) {
+        const u = R.tg[i]; if (u < v) continue;
+        const [x1, y1] = this.P(v), [x2, y2] = this.P(u); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      }
+      ctx.stroke();
+    }
+    drawRange(a, z) {
+      const { ctx, res, sc } = this;
+      for (let k = a; k < z; k++) {
+        const [x, y] = this.P(res.exp[k]);
+        ctx.fillStyle = sc.mid; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = sc.mark;
+        for (let i = res.pstart[k]; i < res.pstart[k + 1]; i++) { const [px, py] = this.P(res.plist[i]); ctx.beginPath(); ctx.arc(px, py, 2.6, 0, Math.PI * 2); ctx.fill(); }
+      }
+      this.markers();
+    }
+    drawPath() {
+      const { ctx, res } = this; if (!res.path.length) return;
+      ctx.strokeStyle = COL.ink; ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath(); res.path.forEach((v, i) => { const [x, y] = this.P(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+      this.markers();
+    }
+    markers() {
+      const { ctx } = this;
+      ctx.fillStyle = COL.ink;
+      for (const v of this.lm) { const [x, y] = this.P(v); ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(x + 8, y + 6); ctx.lineTo(x - 8, y + 6); ctx.closePath(); ctx.fill(); }
+      const [sx, sy] = this.P(this.s), [tx, ty] = this.P(this.t);
+      ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = COL.surface; ctx.beginPath(); ctx.arc(tx, ty, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = COL.ink; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(tx, ty, 9, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = COL.ink; ctx.beginPath(); ctx.arc(tx, ty, 3.2, 0, Math.PI * 2); ctx.fill();
+    }
+    redraw() {
+      if (!this.ctx) return;
+      this.base();
+      if (this.res) { this.drawRange(0, this.shown); if (this.pathOn) this.drawPath(); }
+      this.markers();
+    }
+  }
+
+  const SCHEME_D = { tint: COL.dijT, mark: COL.dij, mid: COL.dijM };
+  const SCHEME_A = { tint: COL.astT, mark: COL.ast, mid: COL.astM };
+
+  /* ---------- race controller ---------- */
+  class Race {
+    constructor(root, runs, opts = {}) {
+      this.root = root; this.runs = runs; this.opts = opts;
+      this.sumEl = $('[data-sum]', root);
+      this.playBtn = $('[data-play]', root);
+      $('[data-replay]', root).addEventListener('click', () => { this.reset(); this.play(); });
+      this.playBtn.addEventListener('click', () => this.running ? this.pause() : this.play());
+      root._race = this;
+    }
+    setResults(list) { list.forEach((res, i) => { this.runs[i].view.res = res; }); this.reset(); }
+    get max() { return Math.max(...this.runs.map(r => r.view.res.exp.length)); }
+    reset() {
+      cancelAnimationFrame(this.raf); this.running = false; this.finished = false; this.kf = 0;
+      this.runs.forEach(r => { r.view.shown = 0; r.view.pathOn = false; r.done = false; r.view.redraw(); r.countEl.textContent = '0'; });
+      this.sumEl.textContent = ''; this.setBtn();
+    }
+    setBtn() { this.playBtn.textContent = this.running ? 'Pause' : (this.finished ? 'Play' : (this.kf ? 'Resume' : 'Play')); }
+    pause() { cancelAnimationFrame(this.raf); this.running = false; this.setBtn(); }
+    play() {
+      if (this.finished) this.reset();
+      if (reduce) { this.advance(this.max); return; }
+      this.running = true; this.setBtn();
+      const rate = Math.max(90, this.max / (this.opts.seconds || 4.2));
+      let last = performance.now();
+      const tick = now => {
+        const dt = Math.min(64, now - last); last = now;
+        this.kf += dt / 1000 * rate;
+        this.advance(Math.floor(this.kf));
+        if (this.finished) { this.running = false; this.setBtn(); return; }
+        if (this.running) this.raf = requestAnimationFrame(tick);
+      };
+      this.raf = requestAnimationFrame(tick);
+    }
+    advance(k) {
+      let all = true;
+      for (const r of this.runs) {
+        const v = r.view, len = v.res.exp.length, target = Math.min(k, len);
+        if (target > v.shown) { v.drawRange(v.shown, target); v.shown = target; r.countEl.textContent = fmt(target); }
+        if (target === len && !r.done) { r.done = true; v.pathOn = true; v.drawPath(); }
+        if (!r.done) all = false;
+      }
+      if (all && !this.finished) { this.finished = true; this.running = false; this.summary(); this.setBtn(); }
+    }
+    summary() {
+      const rs = this.runs.map(r => r.view.res);
+      const steps = rs[0].path.length - 1;
+      if (rs.length === 1) {
+        this.sumEl.innerHTML = `Settled <b>${fmt(rs[0].exp.length)}</b> cells to find a <b>${steps}</b>-step path.`;
+        return;
+      }
+      const a = rs[0].exp.length, b = rs[1].exp.length, n0 = this.runs[0].name, n1 = this.runs[1].name;
+      const same = rs[0].dist === rs[1].dist;
+      let txt;
+      const ratio = Math.max(a, b) / Math.min(a, b);
+      if (ratio < 1.1) txt = `Both settled about the same number of cells (${fmt(a)} vs ${fmt(b)}).`;
+      else {
+        const win = a < b ? n0 : n1, lose = a < b ? n1 : n0;
+        txt = `This run: ${win} settled <b>${ratio >= 10 ? Math.round(ratio) : ratio.toFixed(1)}× fewer</b> cells than ${lose}.`;
+      }
+      this.sumEl.innerHTML = txt + (same ? ` Both paths: <b>${steps}</b> steps.` : '');
+    }
+  }
+
+  /* ---------- build the races ---------- */
+  const caseCache = {};
+  const getCase = fam => caseCache[fam] || (caseCache[fam] = makeCase(fam, SEEDS[fam]));
+  const astarRes = (k, largerG = true) => search(k.G, k.s, k.t, manhattanTo(k.t), largerG);
+  const dijRes = k => search(k.G, k.s, k.t, null);
+
+  function panelParts(root) {
+    return $$('.panel', root).map(p => ({ cv: $('canvas', p), countEl: $('[data-count]', p) }));
+  }
+
+  $$('[data-race]').forEach(root => {
+    const kind = root.dataset.race, parts = panelParts(root);
+    if (kind === 'solo-d' || kind === 'solo-a') {
+      const k = getCase('open'), isD = kind === 'solo-d';
+      const view = new GridView(parts[0].cv, k, isD ? SCHEME_D : SCHEME_A);
+      const race = new Race(root, [{ view, countEl: parts[0].countEl, name: isD ? 'Dijkstra' : 'A*' }]);
+      race.setResults([isD ? dijRes(k) : astarRes(k)]);
+    } else if (kind === 'case') {
+      const k = getCase(root.dataset.family);
+      const race = new Race(root, [
+        { view: new GridView(parts[0].cv, k, SCHEME_D), countEl: parts[0].countEl, name: 'Dijkstra' },
+        { view: new GridView(parts[1].cv, k, SCHEME_A), countEl: parts[1].countEl, name: 'A*' }
+      ]);
+      race.setResults([dijRes(k), astarRes(k)]);
+    } else if (kind === 'tie') {
+      const below = getCase('open');
+      const above = { b: below.b, G: below.G, s: GOAL, t: START };
+      const v0 = new GridView(parts[0].cv, below, SCHEME_A), v1 = new GridView(parts[1].cv, below, SCHEME_A);
+      const race = new Race(root, [
+        { view: v0, countEl: parts[0].countEl, name: 'larger_g' },
+        { view: v1, countEl: parts[1].countEl, name: 'node_id' }
+      ], { seconds: 3.6 });
+      const setDir = dir => {
+        const k = dir === 'above' ? above : below;
+        v0.k = k; v1.k = k;
+        race.setResults([astarRes(k, true), astarRes(k, false)]);
+        $$('[data-dir]', root).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.dir === dir)));
+      };
+      $$('[data-dir]', root).forEach(b => b.addEventListener('click', () => { setDir(b.dataset.dir); race.play(); }));
+      setDir('below');
+    } else if (kind === 'road') {
+      const R = makeRoad(SEEDS.road);
+      const L = selectLandmarks(R, 16, SEEDS.road);
+      const s = nearestNode(R, 0.04, 0.6), t = nearestNode(R, 0.96, 0.32);
+      const vd = new RoadView(parts[0].cv, R, SCHEME_D), va = new RoadView(parts[1].cv, R, SCHEME_A);
+      [vd, va].forEach(v => { v.s = s; v.t = t; });
+      const race = new Race(root, [
+        { view: vd, countEl: parts[0].countEl, name: 'Dijkstra' },
+        { view: va, countEl: parts[1].countEl, name: 'A*' }
+      ], { seconds: 4.5 });
+      const dres = search(R, s, t, null);
+      const setK = K => {
+        va.lm = L.ids.slice(0, K);
+        $('[data-k]', root).textContent = K;
+        race.setResults([dres, search(R, s, t, altTo(L, K, t), true)]);
+        $$('[data-kbtn]', root).forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.kbtn === K)));
+      };
+      $$('[data-kbtn]', root).forEach(b => b.addEventListener('click', () => { setK(+b.dataset.kbtn); race.play(); }));
+      setK(8);
+    }
+  });
+
+  /* ---------- static canvases: cover overlay and thumbnails ---------- */
+  const coverCase = getCase('open'), coverD = dijRes(coverCase), coverA = astarRes(coverCase);
+  const coverView = {
+    cv: $('#cover-canvas'),
+    resize() {
+      if (!this.cv.offsetWidth) return;
+      const d = new GridView(this.cv, coverCase, SCHEME_D);
+      views.pop();
+      Object.assign(d, setupCanvas(this.cv)); d.cs = d.w / GW; d.res = coverD; d.base(); d.drawRange(0, coverD.exp.length);
+      d.sc = SCHEME_A; d.res = coverA; d.drawRange(0, coverA.exp.length); d.drawPath();
+    }
+  };
+  views.push(coverView);
+  $('#cv-d').textContent = fmt(coverD.exp.length);
+  $('#cv-a').textContent = fmt(coverA.exp.length);
+  $('#cv-p').textContent = coverA.path.length - 1;
+
+  $$('[data-thumb]').forEach(cv => {
+    const k = getCase(cv.dataset.thumb);
+    views.push({
+      resize() {
+        if (!cv.offsetWidth) return;
+        const g = new GridView(cv, k, SCHEME_D); views.pop();
+        Object.assign(g, setupCanvas(cv)); g.cs = g.w / GW; g.base(); g.markers();
+      }
+    });
+  });
+
+  // Manhattan numbers for the A* slide: target at row 1, col 7; start at row 3, col 1.
+  (() => {
+    const host = $('#hgrid'), tr = 1, tc = 7;
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 9; c++) {
+      const d = document.createElement('div'), h = Math.abs(r - tr) + Math.abs(c - tc);
+      d.textContent = h === 0 ? '◎' : h;
+      if (h === 0) d.className = 't';
+      if (r === 3 && c === 1) d.className = 's';
+      host.appendChild(d);
+    }
+  })();
+
+  /* ---------- charts (SVG) ---------- */
+  const NS = 'http://www.w3.org/2000/svg';
+  const S = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const T = (parent, x, y, text, cls, anchor = 'start') => { const t = S('text', { x, y, class: cls, 'text-anchor': anchor }, parent); t.textContent = text; return t; };
+  const tip = (el, text) => { S('title', {}, el).textContent = text; };
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const fx = v => v >= 100 ? `${fmt(v)}×` : v >= 10 ? `${v.toFixed(1)}×` : `${v.toFixed(2)}×`;
+  const L10 = Math.log10;
+  const charts = {};
+
+  function legendRingDot(svg, x, y, a, b) {
+    S('circle', { cx: x + 9, cy: y, r: 8, class: 'ring' }, svg); T(svg, x + 28, y + 7, a, 'ann');
+    const x2 = x + 40 + a.length * 10.5;
+    S('circle', { cx: x2 + 9, cy: y, r: 8, class: 'dot' }, svg); T(svg, x2 + 28, y + 7, b, 'ann');
+  }
+
+  // Dumbbell on a log axis: ring = expansion ratio, dot = time ratio.
+  function dumbbell(host, cfg) {
+    const { rows, lo, hi, ticks, w, rowH = 78, labelW = 300, right = 120, top = 78 } = cfg;
+    const plotH = rows.length * rowH, h = top + plotH + 96;
+    const svg = S('svg', { viewBox: `0 0 ${w} ${h}`, width: w, height: h, role: 'img', 'aria-label': cfg.aria }, host);
+    const x0 = labelW, x1 = w - right;
+    const X = v => x0 + (L10(v) - L10(lo)) / (L10(hi) - L10(lo)) * (x1 - x0);
+    legendRingDot(svg, x0, 22, 'fewer expanded vertices', 'faster in wall-clock time');
+    ticks.forEach(t => {
+      S('line', { x1: X(t), x2: X(t), y1: top - 10, y2: top + plotH, class: 'gridl' }, svg);
+      T(svg, X(t), top + plotH + 30, t < 1 ? `${t}×` : `${fmt(t)}×`, 'ax', 'middle');
+    });
+    S('line', { x1: x0, x2: x1, y1: top + plotH, y2: top + plotH, class: 'base' }, svg);
+    S('line', { x1: X(1), x2: X(1), y1: top - 18, y2: top + plotH, class: 'parity' }, svg);
+    T(svg, X(1) - 14, top + plotH + 66, '◂ A* slower', 'sub', 'end');
+    T(svg, X(1) + 14, top + plotH + 66, 'A* faster ▸', 'sub', 'start');
+    const parts = rows.map((r, i) => {
+      const y = top + i * rowH + rowH / 2;
+      if (i) S('line', { x1: 0, x2: x1, y1: top + i * rowH, y2: top + i * rowH, class: 'gridl' }, svg);
+      T(svg, 0, y + (r.sub ? -2 : 8), r.label, 'lab');
+      if (r.sub) T(svg, 0, y + 24, r.sub, 'sub');
+      const ln = S('line', { y1: y, y2: y, class: 'conn' }, svg);
+      const ring = S('circle', { cy: y, r: 9, class: 'ring' }, svg);
+      const dot = S('circle', { cy: y, r: 9, class: 'dot' }, svg);
+      tip(ring, `${r.label}: ${fx(r.exp)} fewer expanded vertices`);
+      tip(dot, `${r.label}: time ratio ${fx(r.time)}${r.note ? ' ' + r.note : ''}`);
+      const tl = T(svg, 0, y + 7, fx(r.time) + (r.note ? ` ${r.note}` : ''), 'val');
+      const el = T(svg, 0, y + 7, fx(r.exp), 'val');
+      return { r, ln, ring, dot, tl, el };
+    });
+    return {
+      render(p) {
+        parts.forEach(o => {
+          const xt = X(Math.pow(10, L10(o.r.time) * p)), xe = X(Math.pow(10, L10(o.r.exp) * p));
+          o.ln.setAttribute('x1', Math.min(xt, xe)); o.ln.setAttribute('x2', Math.max(xt, xe));
+          o.ring.setAttribute('cx', xe); o.dot.setAttribute('cx', xt);
+          const timeLeft = xt <= xe;
+          o.tl.setAttribute('x', timeLeft ? xt - 18 : xt + 18); o.tl.setAttribute('text-anchor', timeLeft ? 'end' : 'start');
+          o.el.setAttribute('x', timeLeft ? xe + 18 : xe - 18); o.el.setAttribute('text-anchor', timeLeft ? 'start' : 'end');
+          const op = p > 0.9 ? 1 : 0;
+          o.tl.setAttribute('opacity', op); o.el.setAttribute('opacity', op);
+        });
+      }
+    };
+  }
+
+  function roundBar(x, y, w, h, r) {
+    if (w <= 0) return `M${x} ${y}h0v${h}h0z`;
+    r = Math.min(r, w, h / 2);
+    return `M${x} ${y}H${x + w - r}Q${x + w} ${y} ${x + w} ${y + r}V${y + h - r}Q${x + w} ${y + h} ${x + w - r} ${y + h}H${x}Z`;
+  }
+
+  function costBars(host, cfg) {
+    const { rows, max, w } = cfg, labelW = 210, right = 120, top = 70, gH = 92, bh = 22;
+    const plotH = rows.length * gH, h = top + plotH + 50;
+    const svg = S('svg', { viewBox: `0 0 ${w} ${h}`, width: w, height: h, role: 'img', 'aria-label': cfg.aria }, host);
+    const x0 = labelW, x1 = w - right, X = v => x0 + v / max * (x1 - x0);
+    S('rect', { x: x0, y: 12, width: 16, height: 16, fill: COL.dij }, svg); T(svg, x0 + 26, 27, 'Dijkstra', 'ann');
+    S('rect', { x: x0 + 150, y: 12, width: 16, height: 16, fill: COL.ast }, svg); T(svg, x0 + 176, 27, 'A*', 'ann');
+    T(svg, x0 + 236, 27, 'nanoseconds per expanded vertex', 'sub');
+    [0, 100, 200, 300, 400].forEach(t => {
+      S('line', { x1: X(t), x2: X(t), y1: top - 8, y2: top + plotH, class: 'gridl' }, svg);
+      T(svg, X(t), top + plotH + 30, t, 'ax', 'middle');
+    });
+    S('line', { x1: x0, x2: x0, y1: top - 8, y2: top + plotH, class: 'base' }, svg);
+    const parts = rows.map((r, i) => {
+      const y = top + i * gH + 12;
+      T(svg, 0, y + bh + 8, r.label, 'lab');
+      const bd = S('path', { fill: COL.dij }, svg), ba = S('path', { fill: COL.ast }, svg);
+      tip(bd, `${r.label}, Dijkstra: ${r.d.toFixed(1)} ns per expansion`); tip(ba, `${r.label}, A*: ${r.a.toFixed(1)} ns per expansion`);
+      const vd = T(svg, 0, y + bh - 4, `${Math.round(r.d)}`, 'val'), va = T(svg, 0, y + 2 * bh + 2 - 4, `${Math.round(r.a)}`, 'val');
+      const ratio = T(svg, w, y + bh + 8, `×${(r.a / r.d).toFixed(2)}`, 'val', 'end');
+      return { r, y, bd, ba, vd, va, ratio };
+    });
+    T(svg, w, top - 22, 'A* ÷ Dijkstra', 'sub', 'end');
+    return {
+      render(p) {
+        parts.forEach(o => {
+          const wd = X(o.r.d * p) - x0, wa = X(o.r.a * p) - x0;
+          o.bd.setAttribute('d', roundBar(x0, o.y, wd, bh, 4)); o.ba.setAttribute('d', roundBar(x0, o.y + bh + 2, wa, bh, 4));
+          o.vd.setAttribute('x', x0 + wd + 10); o.va.setAttribute('x', x0 + wa + 10);
+          const op = p > 0.9 ? 1 : 0; o.vd.setAttribute('opacity', op); o.va.setAttribute('opacity', op); o.ratio.setAttribute('opacity', op);
+        });
+      }
+    };
+  }
+
+  // Lines with direct end labels; emphasised series in ink, the rest muted.
+  function lineChart(host, cfg) {
+    const { w, h, series, xTicks, yTicks, yLog, ylo, yhi, xlo, xhi, parity, yFmt } = cfg;
+    const left = 92, right = cfg.right || 250, top = 30, bottom = 64;
+    const svg = S('svg', { viewBox: `0 0 ${w} ${h}`, width: w, height: h, role: 'img', 'aria-label': cfg.aria }, host);
+    const x0 = left, x1 = w - right, y0 = h - bottom, y1 = top;
+    const X = v => x0 + (v - xlo) / (xhi - xlo) * (x1 - x0);
+    const Y = v => yLog ? y0 - (L10(v) - L10(ylo)) / (L10(yhi) - L10(ylo)) * (y0 - y1) : y0 - (v - ylo) / (yhi - ylo) * (y0 - y1);
+    yTicks.forEach(t => { S('line', { x1: x0, x2: x1, y1: Y(t), y2: Y(t), class: 'gridl' }, svg); T(svg, x0 - 14, Y(t) + 6, yFmt(t), 'ax', 'end'); });
+    xTicks.forEach(([v, lab]) => T(svg, X(v), y0 + 32, lab, 'ax', 'middle'));
+    S('line', { x1: x0, x2: x1, y1: y0, y2: y0, class: 'base' }, svg);
+    if (cfg.xTitle) T(svg, (x0 + x1) / 2, y0 + 60, cfg.xTitle, 'sub', 'middle');
+    if (parity != null) {
+      S('line', { x1: x0, x2: x1, y1: Y(parity), y2: Y(parity), class: 'parity' }, svg);
+      T(svg, x0 + 10, Y(parity) - 10, cfg.parityLabel || 'A* = Dijkstra', 'sub');
+    }
+    const parts = series.map(s => {
+      const pts = s.points.map(([x, y]) => [X(x), Y(y)]);
+      const col = s.ref ? '#a9adb1' : (s.emph ? COL.ink : '#9a9ea3');
+      const path = S('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1]).join(''), class: 'line', stroke: col, 'stroke-width': s.ref ? 1.5 : 2.5 }, svg);
+      const dots = s.ref ? [] : pts.map((p, i) => { const c = S('circle', { cx: p[0], cy: p[1], r: 6, fill: col, stroke: COL.surface, 'stroke-width': 2.5 }, svg); tip(c, `${s.name}: ${s.tipFmt ? s.tipFmt(s.points[i]) : s.points[i][1]}`); return c; });
+      return { s, pts, path, dots, col };
+    });
+    // end labels with simple de-overlap and leader lines
+    const labs = parts.map(o => ({ o, y: o.pts[o.pts.length - 1][1], x: o.pts[o.pts.length - 1][0] })).sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labs.length; i++) if (labs[i].y - labs[i - 1].y < 30) labs[i].y = labs[i - 1].y + 30;
+    labs.forEach(l => {
+      const lx = x1 + 34;
+      l.leader = S('line', { x1: l.x + 10, x2: lx - 6, y1: l.o.pts[l.o.pts.length - 1][1], y2: l.y, stroke: '#c3c6be', 'stroke-width': 1 }, svg);
+      l.text = T(svg, lx, l.y + 7, l.o.s.label, l.o.s.emph ? 'val' : 'ann');
+    });
+    parts.forEach(o => { o.len = o.path.getTotalLength ? o.path.getTotalLength() : 2000; o.path.setAttribute('stroke-dasharray', o.len); });
+    return {
+      render(p) {
+        parts.forEach(o => {
+          o.path.setAttribute('stroke-dashoffset', o.len * (1 - p));
+          o.dots.forEach((d, i) => d.setAttribute('opacity', p >= (o.pts.length > 1 ? i / (o.pts.length - 1) : 0) * 0.98 ? 1 : 0));
+        });
+        labs.forEach(l => { const op = p > 0.95 ? 1 : 0; l.text.setAttribute('opacity', op); l.leader.setAttribute('opacity', op); });
+      }
+    };
+  }
+
+  function scatter(host, cfg) {
+    const { w, h, pts } = cfg, left = 92, right = 40, top = 24, bottom = 74;
+    const svg = S('svg', { viewBox: `0 0 ${w} ${h}`, width: w, height: h, role: 'img', 'aria-label': cfg.aria }, host);
+    const x0 = left, x1 = w - right, y0 = h - bottom, y1 = top, ylo = 0.4, yhi = 1000;
+    const X = v => x0 + v / 1.0 * (x1 - x0);
+    const Y = v => y0 - (L10(v) - L10(ylo)) / (L10(yhi) - L10(ylo)) * (y0 - y1);
+    [0.5, 1, 10, 100, 1000].forEach(t => { S('line', { x1: x0, x2: x1, y1: Y(t), y2: Y(t), class: 'gridl' }, svg); T(svg, x0 - 14, Y(t) + 6, `${t < 1 ? t : fmt(t)}×`, 'ax', 'end'); });
+    [0, 0.25, 0.5, 0.75, 1].forEach(t => T(svg, X(t), y0 + 32, t.toFixed(2), 'ax', 'middle'));
+    T(svg, (x0 + x1) / 2, y0 + 64, 'heuristic error: mean |d − h| ÷ mean d', 'sub', 'middle');
+    S('line', { x1: x0, x2: x1, y1: y0, y2: y0, class: 'base' }, svg);
+    S('line', { x1: x0, x2: x1, y1: Y(1), y2: Y(1), class: 'parity' }, svg);
+    T(svg, X(0.5), Y(1) - 10, 'A* = Dijkstra', 'sub', 'middle');
+    const fam = { o: 'open', r: 'random', c: 'clustered', m: 'rooms', z: 'maze' };
+    const dots = pts.map(([f, e, r]) => {
+      const c = S('circle', { cx: X(Math.min(e, 1)), cy: Y(Math.max(ylo, Math.min(yhi, r))), r: 5.5, fill: COL.ink, 'fill-opacity': 0.55, stroke: COL.surface, 'stroke-width': 1.5 }, svg);
+      tip(c, `${fam[f]}: error ${e.toFixed(3)}, time ratio ${fx(r)}`);
+      return c;
+    });
+    const ann = [
+      T(svg, X(0.05), Y(300), 'open: h is exact', 'ann'),
+      T(svg, X(0.19), Y(14), 'random, clustered, rooms', 'ann'),
+      T(svg, X(0.80), Y(2.1), 'maze: h is 97% off', 'ann', 'middle'),
+      T(svg, x1, y1 + 14, 'Spearman ρ = −0.81', 'val', 'end')
+    ];
+    return {
+      render(p) {
+        const n = dots.length;
+        dots.forEach((d, i) => d.setAttribute('opacity', p * 1.25 - (i / n) * 0.25 > 0.6 ? 1 : 0));
+        ann.forEach(a => a.setAttribute('opacity', p > 0.95 ? 1 : 0));
+      }
+    };
+  }
+
+  // Data from results/ (frozen run).
+  const DATA = {
+    overview: [
+      { label: 'open', exp: 222.45, time: 105.66 },
+      { label: 'random', sub: '20% walls', exp: 21.41, time: 12.84 },
+      { label: 'clustered', sub: '30% walls', exp: 22.92, time: 12.81 },
+      { label: 'rooms', exp: 14.31, time: 8.73 },
+      { label: 'maze', exp: 1.019, time: 0.807 },
+      { label: 'roads', sub: 'ALT, K = 8', exp: 11.54, time: 7.62 }
+    ],
+    road: [
+      { label: 'K = 1', sub: 'time gain not significant', exp: 1.958, time: 1.290 },
+      { label: 'K = 4', exp: 7.265, time: 4.752 },
+      { label: 'K = 8', sub: 'main treatment', exp: 11.54, time: 7.620 },
+      { label: 'K = 16', exp: 22.41, time: 13.52 }
+    ],
+    cost: [
+      { label: 'open', d: 142.2, a: 288.3 }, { label: 'random', d: 156.5, a: 254.1 },
+      { label: 'clustered', d: 126.7, a: 245.0 }, { label: 'rooms', d: 146.0, a: 270.4 },
+      { label: 'maze', d: 64.9, a: 78.8 }, { label: 'roads K = 8', d: 234.5, a: 372.9 }
+    ],
+    scaling: {
+      open: [45.46, 76.01, 177.36, 389.85], clustered: [8.77, 9.19, 34.04, 25.15],
+      random: [12.02, 11.28, 12.74, 20.97], rooms: [7.60, 8.72, 11.40, 8.74], maze: [0.75, 0.77, 0.86, 0.97]
+    },
+    weighted: { 1: [0.775, 0.933, 0.969, 1.010], 10: [0.782, 0.960, 1.151, 1.218], 50: [0.858, 0.966, 1.203, 1.683] },
+    omp: {
+      orig: [[1, 1], [2, 2.066], [4, 4.392], [8, 7.085], [16, 9.727]],
+      repl: [[1, 1], [2, 1.908], [4, 3.492], [8, 6.254], [12, 7.175]], replLabel: 'M4 Pro, 12 thr: 7.18×'
+    },
+    scatter: SCATTER_PTS
+  };
+
+  const builders = {
+    overview: el => dumbbell(el, { rows: DATA.overview, lo: 0.5, hi: 1000, ticks: [0.5, 1, 10, 100, 1000], w: 1712, rowH: 82, labelW: 280, aria: 'Expansion and time ratios per graph family' }),
+    road: el => dumbbell(el, { rows: DATA.road, lo: 0.5, hi: 50, ticks: [0.5, 1, 2, 5, 10, 20, 50], w: 1080, rowH: 104, labelW: 230, aria: 'Road network ratios by number of landmarks' }),
+    cost: el => costBars(el, { rows: DATA.cost, max: 400, w: 780, aria: 'Nanoseconds per expanded vertex, Dijkstra vs A*' }),
+    scaling: el => lineChart(el, {
+      w: 1100, h: 640, yLog: true, ylo: 0.5, yhi: 500, xlo: 0, xhi: 3, parity: 1,
+      yTicks: [0.5, 1, 10, 100, 500], yFmt: t => `${t}×`, xTicks: [[0, '128²'], [1, '256²'], [2, '512²'], [3, '1024²']], xTitle: 'grid size (cells)',
+      series: ['open', 'clustered', 'random', 'rooms', 'maze'].map(f => ({
+        name: f, emph: f === 'open' || f === 'maze', points: DATA.scaling[f].map((v, i) => [i, v]),
+        label: `${f} ${fx(DATA.scaling[f][3])}`, tipFmt: p => fx(p[1])
+      })),
+      aria: 'Time ratio by grid size for each family'
+    }),
+    weighted: el => lineChart(el, {
+      w: 1060, h: 640, yLog: false, ylo: 0.6, yhi: 1.8, xlo: 0, xhi: 3, parity: 1, parityLabel: 'Dijkstra speed',
+      yTicks: [0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8], yFmt: t => `${t.toFixed(1)}×`, xTicks: [[0, '128²'], [1, '256²'], [2, '512²'], [3, '1024²']], xTitle: 'maze size (cells)',
+      series: [50, 10, 1].map(e => ({ name: `ε = ${e}`, emph: e === 50, points: DATA.weighted[e].map((v, i) => [i, v]), label: `ε = ${e}: ${fx(DATA.weighted[e][3])}`, tipFmt: p => fx(p[1]) })),
+      aria: 'Weighted A* time ratio by maze size and epsilon'
+    }),
+    omp: el => {
+      const series = [
+        { name: 'ideal', ref: true, points: [[1, 1], [16, 16]], label: 'ideal' },
+        { name: 'Intel Ultra 9 · WSL2', emph: true, points: DATA.omp.orig, label: 'Intel, 16 thr: 9.73×', tipFmt: p => `${p[0]} threads: ${p[1].toFixed(2)}×` }
+      ];
+      if (DATA.omp.repl) series.push({ name: 'Apple M4 Pro · macOS', points: DATA.omp.repl, label: DATA.omp.replLabel, tipFmt: p => `${p[0]} threads: ${p[1].toFixed(2)}×` });
+      return lineChart(el, {
+        w: 1000, h: 640, yLog: false, ylo: 0, yhi: 16, xlo: 0, xhi: 16, parity: null,
+        yTicks: [0, 4, 8, 12, 16], yFmt: t => `${t}×`, xTicks: [[1, '1'], [2, '2'], [4, '4'], [8, '8'], [12, '12'], [16, '16']], xTitle: 'threads',
+        series, right: 260, aria: 'Batch speed-up by number of threads'
+      });
+    },
+    scatter: el => scatter(el, { w: 1060, h: 640, pts: DATA.scatter, aria: 'Heuristic error vs time ratio for 300 grid queries' })
+  };
+
+  $$('[data-chart]').forEach(el => { const c = builders[el.dataset.chart](el); c.render(1); el._chart = c; });
+
+  function tween(fn, ms = 1000) {
+    if (reduce) { fn(1); return; }
+    const t0 = performance.now();
+    const step = now => { const p = Math.min(1, (now - t0) / ms); fn(ease(p)); if (p < 1) requestAnimationFrame(step); };
+    fn(0); requestAnimationFrame(step);
+  }
+
+  /* ---------- ALT diagram ---------- */
+  (() => {
+    const host = $('#alt-diagram'), w = 760, h = 520;
+    const svg = S('svg', { viewBox: `0 0 ${w} ${h}`, width: w, height: h, role: 'img', 'aria-label': 'Triangle inequality with a landmark L, a vertex v and the target t' }, host);
+    const L = [90, 420], v = [640, 110], t = [470, 420];
+    S('path', { d: `M${L[0]} ${L[1]} Q ${300} ${120} ${v[0]} ${v[1]}`, fill: 'none', stroke: COL.ink, 'stroke-width': 2.5 }, svg);
+    S('path', { d: `M${L[0]} ${L[1]} Q ${280} ${470} ${t[0]} ${t[1]}`, fill: 'none', stroke: COL.ink, 'stroke-width': 2.5 }, svg);
+    S('path', { d: `M${v[0]} ${v[1]} Q ${640} ${330} ${t[0]} ${t[1]}`, fill: 'none', stroke: COL.ast, 'stroke-width': 5, 'stroke-linecap': 'round' }, svg);
+    T(svg, 300, 150, 'd(L, v) = 9 hops', 'lab', 'middle');
+    T(svg, 280, 486, 'd(L, t) = 3 hops', 'lab', 'middle');
+    T(svg, 596, 300, 'd(v, t) ≥ 9 − 3 = 6', 'lab', 'end');
+    S('path', { d: `M${L[0]} ${L[1] - 22} L${L[0] + 20} ${L[1] + 14} L${L[0] - 20} ${L[1] + 14} Z`, fill: COL.ink }, svg);
+    T(svg, L[0], L[1] + 50, 'landmark L', 'sub', 'middle');
+    S('circle', { cx: v[0], cy: v[1], r: 12, fill: COL.ink }, svg);
+    T(svg, v[0], v[1] - 26, 'vertex v', 'sub', 'middle');
+    S('circle', { cx: t[0], cy: t[1], r: 16, fill: COL.surface, stroke: COL.ink, 'stroke-width': 4 }, svg);
+    S('circle', { cx: t[0], cy: t[1], r: 5, fill: COL.ink }, svg);
+    T(svg, t[0], t[1] + 50, 'target t', 'sub', 'middle');
+  })();
+
+  /* ---------- deck ---------- */
+  const slides = $$('.slide');
+  let cur = 0;
+  const pad = n => String(n).padStart(2, '0');
+
+  function fit() {
+    const vw = vp.clientWidth, vh = vp.clientHeight;
+    scale = Math.min(vw / 1920, vh / 1080);
+    stage.style.transform = `translate(${Math.round((vw - 1920 * scale) / 2)}px, ${Math.round((vh - 1080 * scale) / 2)}px) scale(${scale})`;
+    views.forEach(v => v.resize());
+  }
+
+  function enter(s) {
+    $$('[data-chart]', s).forEach(el => tween(p => el._chart.render(p)));
+    $$('[data-race]', s).forEach(el => { const r = el._race; r.reset(); clearTimeout(r.timer); r.timer = setTimeout(() => r.play(), reduce ? 0 : 450); });
+  }
+  function leave(s) {
+    $$('[data-race]', s).forEach(el => { clearTimeout(el._race.timer); el._race.reset(); });
+  }
+  function go(n, { back = false, initial = false } = {}) {
+    n = Math.max(0, Math.min(slides.length - 1, n));
+    if (n === cur && !initial) return;
+    const old = slides[cur];
+    if (initial) slides.forEach(x => x.classList.remove('active'));
+    else { leave(old); old.classList.remove('active'); }
+    cur = n;
+    const s = slides[cur];
+    $$('[data-build]', s).forEach(b => b.classList.toggle('shown', back || initial));
+    s.classList.add('active');
+    enter(s);
+    $('#foot-sec').textContent = s.dataset.section || '';
+    $('#foot-num').textContent = `${pad(cur + 1)} / ${pad(slides.length)}`;
+    try { history.replaceState(null, '', '#slide-' + (cur + 1)); } catch (e) { /* hash routing is optional */ }
+  }
+  function next() {
+    const pending = $$('[data-build]:not(.shown)', slides[cur]);
+    if (pending.length) { pending[0].classList.add('shown'); return; }
+    go(cur + 1);
+  }
+  function prev() { go(cur - 1, { back: true }); }
+
+  $('#next').addEventListener('click', next);
+  $('#prev').addEventListener('click', prev);
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key;
+    if (k === 'ArrowRight' || k === 'PageDown' || ((k === ' ' || k === 'Enter') && !e.target.closest('button'))) { e.preventDefault(); next(); }
+    else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); prev(); }
+    else if (k === 'Home') go(0);
+    else if (k === 'End') go(slides.length - 1, { back: true });
+    else if (k === 'f' || k === 'F') {
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      else document.documentElement.requestFullscreen?.().catch(() => {});
+    } else if (k === 'r' || k === 'R') {
+      $$('[data-race]', slides[cur]).forEach(el => { el._race.reset(); el._race.play(); });
+      $$('[data-chart]', slides[cur]).forEach(el => tween(p => el._chart.render(p)));
+    }
+  });
+  let sx = null;
+  stage.addEventListener('pointerdown', e => { sx = e.target.closest('button') ? null : e.clientX; });
+  stage.addEventListener('pointerup', e => {
+    if (sx == null) return;
+    const dx = e.clientX - sx; sx = null;
+    if (Math.abs(dx) > 60) (dx < 0 ? next : prev)();
+  });
+
+  addEventListener('resize', fit);
+  fit();
+  const m = /^#slide-(\d+)$/.exec(location.hash);
+  go(m ? (+m[1] - 1) : 0, { initial: true });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+})();
+</script>
+
+</body>
+</html>

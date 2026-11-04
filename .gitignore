@@ -1,0 +1,25 @@
+# Build output
+build/
+cmake-build-*/
+
+# SNAP data and generated binaries (278 MB); recreate with ./download_data.sh
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# LaTeX intermediates (PDFs are committed)
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.synctex.gz
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/

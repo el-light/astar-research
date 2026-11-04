@@ -1,0 +1,37 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "common.hpp"
+#include "graph.hpp"
+#include "grid.hpp"
+#include "heuristic.hpp"
+
+namespace astar {
+
+// Heuristic-informativeness diagnostics.  For each query we compute the true
+// distance from every sampled vertex to the target with BFS, compare it with
+// the heuristic, and record rank correlation, error and effective branching.
+int run_grid_diagnostics(const std::string& output,
+                         const std::vector<std::uint32_t>& sizes,
+                         const std::vector<GridFamily>& families,
+                         std::uint32_t per_band = 5,
+                         std::uint64_t seed = 20261030);
+
+int run_real_diagnostics(const std::string& output, const Graph& graph,
+                         const LandmarkData& landmarks, std::uint32_t k = 8,
+                         std::uint32_t per_band = 10,
+                         std::uint64_t seed = 20261030);
+
+// Weighted A* on perfect mazes: f = g + epsilon * h.  A value epsilon > 1
+// trades optimality for speed; the result is checked against the exact
+// Dijkstra/BFS distance and reported as a cost ratio.
+int run_weighted_maze(const std::string& output,
+                      const std::vector<std::uint32_t>& sizes,
+                      std::uint32_t per_band = 5,
+                      std::uint32_t reps = 3,
+                      std::uint64_t seed = 20261030);
+
+}  // namespace astar
