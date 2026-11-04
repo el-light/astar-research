@@ -63,6 +63,13 @@ it, so it runs offline:
 OPEN=1 ./scripts/serve_slides.sh     # same, and open the browser
 ```
 
+To send the deck to someone, use the single-file copies:
+
+- [`slides/astar_defence_deck.html`](slides/astar_defence_deck.html): the animated deck with the fonts embedded; download it and open it with a double-click, no server or internet needed.
+- [`slides/astar_defence_deck.pdf`](slides/astar_defence_deck.pdf): the same 25 slides as a static PDF.
+
+After editing `slides/web/index.html`, rebuild the single file with `python3 scripts/bundle_slides.py`.
+
 Keys: `←`/`→`/`Space` to move, `F` for full screen, `R` to replay an animation;
 `#slide-12` in the URL jumps to a slide.  The static LaTeX decks are
 `slides/defence.pdf` and `slides/checkpoint.pdf`.
@@ -303,6 +310,9 @@ slides/defence.tex               defence deck source
 slides/defence.pdf               rendered defence deck
 slides/web/index.html            animated defence deck (offline; fonts in slides/web/fonts/)
 scripts/serve_slides.sh          serves the animated deck at http://localhost:8000
+slides/astar_defence_deck.html   the animated deck as one file to send (fonts embedded)
+slides/astar_defence_deck.pdf    the same deck as a static 25-page PDF
+scripts/bundle_slides.py         rebuilds astar_defence_deck.html from slides/web/
 results/replication_macos/       full rerun on a second machine (Apple M4 Pro)
 scripts/run_replication_macos.sh full pipeline on macOS into results/replication_macos/
 scripts/analyze_replication.py   runs the analysis scripts on the replication folder
